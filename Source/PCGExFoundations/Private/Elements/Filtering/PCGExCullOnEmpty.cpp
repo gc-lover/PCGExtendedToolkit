@@ -8,6 +8,7 @@
 #include "PCGPin.h"
 #include "Data/PCGBasePointData.h"
 #include "Data/PCGPolyLineData.h"
+#include "Factories/PCGExFactories.h"
 #include "Metadata/PCGMetadata.h"
 
 #define LOCTEXT_NAMESPACE "CullOnEmptyElement"
