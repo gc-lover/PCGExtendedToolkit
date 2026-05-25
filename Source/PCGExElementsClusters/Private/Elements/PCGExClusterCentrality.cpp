@@ -71,7 +71,7 @@ TArray<FPCGPinProperties> UPCGExClusterCentralitySettings::InputPinProperties() 
 
 PCGExData::EIOInit UPCGExClusterCentralitySettings::GetMainOutputInitMode() const
 {
-	return StealData == EPCGExOptionState::Enabled ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
+	return WantsDataStealing() ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
 }
 
 PCGExData::EIOInit UPCGExClusterCentralitySettings::GetEdgeOutputInitMode() const
@@ -109,22 +109,23 @@ bool FPCGExClusterCentralityElement::AdvanceWork(FPCGExContext* InContext, const
 	PCGEX_EXECUTION_CHECK
 	PCGEX_ON_INITIAL_EXECUTION
 	{
-		if (!Context->StartProcessingClusters([](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
-		                                      {
-			                                      return true;
-		                                      }, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
-		                                      {
-			                                      if (Settings->IsPathBased())
-			                                      {
-				                                      NewBatch->SetWantsHeuristics(true, Settings->HeuristicScoreMode);
-			                                      }
-			                                      NewBatch->bSkipCompletion = true;
-			                                      NewBatch->bRequiresWriteStep = true;
-			                                      if (Settings->IsPathBased() && Settings->DownsamplingMode == EPCGExCentralityDownsampling::Filters)
-			                                      {
-				                                      NewBatch->VtxFilterFactories = &Context->VtxFilterFactories;
-			                                      }
-		                                      }))
+		if (!Context->StartProcessingClusters(
+			[](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
+			{
+				return true;
+			}, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
+			{
+				if (Settings->IsPathBased())
+				{
+					NewBatch->SetWantsHeuristics(true, Settings->HeuristicScoreMode);
+				}
+				NewBatch->bSkipCompletion = true;
+				NewBatch->bRequiresWriteStep = true;
+				if (Settings->IsPathBased() && Settings->DownsamplingMode == EPCGExCentralityDownsampling::Filters)
+				{
+					NewBatch->VtxFilterFactories = &Context->VtxFilterFactories;
+				}
+			}))
 		{
 			return Context->CancelExecution(TEXT("Could not build any clusters."));
 		}

@@ -52,17 +52,14 @@ void UPCGExSettings::PostEditChangeProperty(struct FPropertyChangedEvent& Proper
 	}
 
 	bCachedSupportsDataStealing = SupportsDataStealing();
-	bCachedSupportsInitPolicy = GetExecutionPolicy() != EPCGExExecutionPolicy::Ignored;
-
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 }
 #endif
 
 void UPCGExSettings::PostLoad()
 {
-	Super::PostLoad();
 	bCachedSupportsDataStealing = SupportsDataStealing();
-	bCachedSupportsInitPolicy = GetExecutionPolicy() != EPCGExExecutionPolicy::Ignored;
+	Super::PostLoad();
 }
 
 bool UPCGExSettings::IsPinUsedByNodeExecution(const UPCGPin* InPin) const
@@ -77,6 +74,16 @@ bool UPCGExSettings::IsPinUsedByNodeExecution(const UPCGPin* InPin) const
 PCGExData::EIOInit UPCGExSettings::GetMainDataInitializationPolicy() const
 {
 	return PCGExData::EIOInit::NoInit;
+}
+
+bool UPCGExSettings::GetForceOffThreadPrepare(const FPCGExContext* InContext) const
+{
+	return bForceOffThreadPrepare || (PCGEX_CORE_SETTINGS.bRuntimeAlwaysOffThread && InContext->IsRuntimeGen());
+}
+
+bool UPCGExSettings::GetForceOffThreadExecute(const FPCGExContext* InContext) const
+{
+	return bForceOffThreadExecute || (PCGEX_CORE_SETTINGS.bRuntimeAlwaysOffThread && InContext->IsRuntimeGen());
 }
 
 #if WITH_EDITOR
