@@ -21,7 +21,7 @@ PCGExData::EIOInit UPCGExEdgeOrderSettings::GetMainOutputInitMode() const
 
 PCGExData::EIOInit UPCGExEdgeOrderSettings::GetEdgeOutputInitMode() const
 {
-	return StealData == EPCGExOptionState::Enabled ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
+	return WantsDataStealing() ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
 }
 
 TArray<FPCGPinProperties> UPCGExEdgeOrderSettings::InputPinProperties() const
@@ -70,12 +70,13 @@ bool FPCGExEdgeOrderElement::AdvanceWork(FPCGExContext* InContext, const UPCGExS
 	PCGEX_EXECUTION_CHECK
 	PCGEX_ON_INITIAL_EXECUTION
 	{
-		if (!Context->StartProcessingClusters([](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
-		                                      {
-			                                      return true;
-		                                      }, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
-		                                      {
-		                                      }))
+		if (!Context->StartProcessingClusters(
+			[](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
+			{
+				return true;
+			}, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
+			{
+			}))
 		{
 			return Context->CancelExecution(TEXT("Could not build any clusters."));
 		}

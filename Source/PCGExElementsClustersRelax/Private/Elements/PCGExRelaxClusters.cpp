@@ -18,12 +18,12 @@
 
 PCGExData::EIOInit UPCGExRelaxClustersSettings::GetMainOutputInitMode() const
 {
-	return StealData == EPCGExOptionState::Enabled ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
+	return WantsDataStealing() ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
 }
 
 PCGExData::EIOInit UPCGExRelaxClustersSettings::GetEdgeOutputInitMode() const
 {
-	return StealData == EPCGExOptionState::Enabled ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
+	return WantsDataStealing() ? PCGExData::EIOInit::Forward : PCGExData::EIOInit::Duplicate;
 }
 
 TArray<FPCGPinProperties> UPCGExRelaxClustersSettings::InputPinProperties() const
@@ -63,15 +63,16 @@ bool FPCGExRelaxClustersElement::AdvanceWork(FPCGExContext* InContext, const UPC
 	PCGEX_EXECUTION_CHECK
 	PCGEX_ON_INITIAL_EXECUTION
 	{
-		if (!Context->StartProcessingClusters([](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
-		                                      {
-			                                      return true;
-		                                      }, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
-		                                      {
-			                                      NewBatch->bRequiresWriteStep = true;
-			                                      NewBatch->AllocateVtxProperties = EPCGPointNativeProperties::Transform;
-			                                      NewBatch->VtxFilterFactories = &Context->VtxFilterFactories;
-		                                      }))
+		if (!Context->StartProcessingClusters(
+			[](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
+			{
+				return true;
+			}, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
+			{
+				NewBatch->bRequiresWriteStep = true;
+				NewBatch->AllocateVtxProperties = EPCGPointNativeProperties::Transform;
+				NewBatch->VtxFilterFactories = &Context->VtxFilterFactories;
+			}))
 		{
 			return Context->CancelExecution(TEXT("Could not build any clusters."));
 		}

@@ -3,6 +3,7 @@
 
 #include "Elements/PCGExPathfindingFindCellsBounded.h"
 
+#include "Containers/Queue.h"
 #include "Clusters/PCGExCluster.h"
 #include "Clusters/PCGExClustersHelpers.h"
 #include "Clusters/Artifacts/PCGExCell.h"
@@ -269,14 +270,15 @@ bool FPCGExFindContoursBoundedElement::AdvanceWork(FPCGExContext* InContext, con
 	PCGEX_EXECUTION_CHECK
 	PCGEX_ON_INITIAL_EXECUTION
 	{
-		if (!Context->StartProcessingClusters([](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
-		                                      {
-			                                      return true;
-		                                      }, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
-		                                      {
-			                                      NewBatch->bSkipCompletion = true;
-			                                      NewBatch->SetProjectionDetails(Settings->ProjectionDetails);
-		                                      }))
+		if (!Context->StartProcessingClusters(
+			[](const TSharedPtr<PCGExData::FPointIOTaggedEntries>& Entries)
+			{
+				return true;
+			}, [&](const TSharedPtr<PCGExClusterMT::IBatch>& NewBatch)
+			{
+				NewBatch->bSkipCompletion = true;
+				NewBatch->SetProjectionDetails(Settings->ProjectionDetails);
+			}))
 		{
 			return Context->CancelExecution(TEXT("Could not build any clusters."));
 		}
