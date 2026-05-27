@@ -35,9 +35,7 @@ public:
 		return EPCGSettingsType::Filter;
 	}
 #endif
-	
-	virtual FPCGDataTypeIdentifier GetCurrentPinTypesID(const UPCGPin* InPin) const override;
-	
+		
 	/** */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings)
 	bool bCheckOnly = false;
