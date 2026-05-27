@@ -26,6 +26,7 @@
 #include "Data/PCGPointArrayData.h"
 #include "Data/PCGSpatialData.h"
 #include "Engine/Level.h"
+#include "Helpers/PCGExCollectionSortKeys.h"
 #include "Helpers/PCGExCollectionsHelpers.h"
 #include "Helpers/PCGExDefaultLevelDataExporter.h"
 #include "Helpers/PCGExLevelDataExporter.h"
@@ -414,6 +415,22 @@ namespace PCGExSharedCompact
 		UPackage* TargetPackage = CreatePackage(*DesiredPackagePath);
 		check(TargetPackage);
 
+		// SavePackage refuses to overwrite a package that is only partially loaded -- doing so
+		// would clobber the unloaded on-disk exports (see SavePackage2.cpp IsFullyLoaded guard).
+		// When the destination already exists on disk but was never loaded this session,
+		// CreatePackage hands back an unloaded stub (IsFullyLoaded() == false). This is the
+		// common case during cook: per-entry ExportedDataAssets are reached only via soft refs
+		// (Staging.Path), so a project-wide rebuild that force-loads collections never pulls the
+		// data-asset packages in. Fully load the target first -- it both materializes the
+		// existing occupant for the eviction below and makes the resulting package saveable.
+		// Newly-created packages with no file on disk already report IsFullyLoaded() == true, so
+		// this is a no-op for them. (Shared collections don't hit this because CompactShared
+		// LoadSynchronous()'s their external package back before modifying it.)
+		if (!TargetPackage->IsFullyLoaded())
+		{
+			TargetPackage->FullyLoad();
+		}
+
 		// If something already owns the target name in the target package, evict it. Renaming
 		// onto a name conflict would otherwise assert; we expect this on subsequent rebuilds
 		// when an old externalized asset is still loaded in the editor.
@@ -574,6 +591,14 @@ namespace PCGExSharedCompact
 	// Policies + CompactShared reference Editor* fields on FPCGExPCGDataAssetCollectionEntry
 	// which are themselves WITH_EDITORONLY_DATA. Their callers (CompactSharedMesh /
 	// CompactSharedLevel) are body-guarded the same way.
+	//
+	// SortKey implementations live in Helpers/PCGExCollectionSortKeys.{h,cpp} as free
+	// functions so they're directly testable from PCGExtendedToolkitTest. FArchiveBlake3
+	// (the process-stable Blake3 archive that backs the descriptor digest) is exposed in
+	// Helpers/PCGExArchiveBlake3.h. The full SortKey contract -- process-stable, fully
+	// discriminating, leading-field stable on mesh path -- is documented on the header
+	// declarations.
+
 	// --- Policy structs supplying entry-specific knowledge to CompactShared<>. ---
 	struct FMeshPolicy
 	{
@@ -597,7 +622,7 @@ namespace PCGExSharedCompact
 
 		static FString SortKey(const FPCGExMeshCollectionEntry& E)
 		{
-			return E.StaticMesh.ToSoftObjectPath().ToString();
+			return ::PCGExSharedCompact::MeshSortKey(E);
 		}
 
 		static const TArray<FPCGExMeshCollectionEntry>& Contributions(const FPCGExPCGDataAssetCollectionEntry& E)
@@ -645,7 +670,7 @@ namespace PCGExSharedCompact
 
 		static FString SortKey(const FPCGExLevelCollectionEntry& E)
 		{
-			return E.Level.ToSoftObjectPath().ToString();
+			return ::PCGExSharedCompact::LevelSortKey(E);
 		}
 
 		static const TArray<FPCGExLevelCollectionEntry>& Contributions(const FPCGExPCGDataAssetCollectionEntry& E)
@@ -679,7 +704,8 @@ namespace PCGExSharedCompact
 	// (identity via TPolicy::Hash + TPolicy::Equals), then rewrite Tag_EntryIdx on the
 	// policy's pin against the resulting shared indices. Tags/Category/PropertyOverrides
 	// on existing shared entries are preserved across rebuilds when identity survives.
-	// Deterministic ordering: (hash, sort-key) ascending -- stable across cold cooks.
+	// Deterministic ordering: by content-derived SortKey ascending -- stable across cold cooks
+	// and editor restarts (does NOT depend on the per-process FName comparison-index hash).
 	template <typename TPolicy>
 	static void CompactShared(
 		UObject* Outer,
@@ -795,12 +821,14 @@ namespace PCGExSharedCompact
 				AllGroups.Add(MoveTemp(G));
 			}
 		}
+		// Order purely by the content-derived, process-stable SortKey. FGroup::Hash is NOT used
+		// here: it comes from TPolicy::Hash -> GetTypeHash(FSoftObjectPath) -> GetTypeHash(FName),
+		// which is the per-process FName comparison index and reshuffles across sessions/cooks.
+		// TPolicy::SortKey fully discriminates every distinct group (see FMeshPolicy::SortKey), so
+		// no two groups share a key and there is no tie-break to fall back on. Hash is retained
+		// only as an in-process bucket key for grouping/preservation above.
 		AllGroups.Sort([](const FGroup& A, const FGroup& B)
 		{
-			if (A.Hash != B.Hash)
-			{
-				return A.Hash < B.Hash;
-			}
 			return A.SortKey < B.SortKey;
 		});
 
@@ -1216,13 +1244,23 @@ void UPCGExPCGDataAssetCollection::PreSave(FObjectPreSaveContext ObjectSaveConte
 {
 	// Cook-time safety net for users who edited a source level and cooked without a manual
 	// rebuild (or recovered from a mid-edit editor crash). Idempotent.
+	//
+	// Only re-bake the IN-MEMORY state here. 
+	// We deliberately do NOT call SaveExternalPackages() during cook:
+	//  - SavePackage(Pkg, nullptr, ...) is an editor (uncooked) save that writes the SOURCE
+	//    .uasset under /Content/. A cook must be read-only w.r.t. source content; writing it
+	//    dirties the workspace and fails / forces a writable-flip on read-only (Perforce) files.
+	//  - It mutates packages the cooker may have already cooked (no effect) or not yet cooked
+	//    (changing the source mid-cook), making the output depend on cook scheduling.
+	//  - In concurrent / cook-by-the-book saving, GIsSavingPackage is held for the whole batch;
+	//    a nested non-concurrent SavePackage clears it on scope-exit, breaking that invariant.
+	// On most cases (except for potential multi-threaded cooks), external objects are
+	// cooked from the loaded in-memory ones which should be enough.
+	// Actually might want to consider just removing this as the levels aren't actually being re-harvested
+	// at all here so the safety net is not quite comprehensive in the first place.
 	if (ObjectSaveContext.IsCooking())
 	{
 		RebuildSharedCollections();
-		if (IsExternalActive())
-		{
-			SaveExternalPackages();
-		}
 	}
 	Super::PreSave(ObjectSaveContext);
 }

@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 
 #include "PCGExCoreMacros.h"
+#include "PCGExCoreSettingsCache.h"
 #include "PCGExPropertyWriter.h"
 #include "Core/PCGExContext.h"
 #include "Core/PCGExElement.h"
@@ -153,10 +154,14 @@ namespace PCGExGetPropertiesData
 	 *  slot state and never transition. The filter step branches on equality, not numeric ordering. */
 	enum class ESlotOutcome : uint8
 	{
-		Unresolved = 0,    // Path didn't resolve to a component.
-		FailedSchema,      // Component resolved but failed the RequiredSchemas filter -- always dropped when that filter is on.
-		Partial,           // Component resolved but at least one requested property was missing.
-		Complete,          // Component resolved and every requested property was written.
+		Unresolved = 0,
+		// Path didn't resolve to a component.
+		FailedSchema,
+		// Component resolved but failed the RequiredSchemas filter -- always dropped when that filter is on.
+		Partial,
+		// Component resolved but at least one requested property was missing.
+		Complete,
+		// Component resolved and every requested property was written.
 	};
 }
 
