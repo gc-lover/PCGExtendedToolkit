@@ -9,7 +9,7 @@
 #include "PCGExMetaCleanup.generated.h"
 
 UCLASS(MinimalAPI, BlueprintType, ClassGroup = (Procedural), Category="PCGEx|Misc", meta=(PCGExNodeLibraryDoc="metadata/modify/meta-cleanup"))
-class UPCGExMetaCleanupSettings : public UPCGExPointsProcessorSettings
+class UPCGExMetaCleanupSettings : public UPCGExSettings
 {
 	GENERATED_BODY()
 
@@ -30,12 +30,22 @@ public:
 #endif
 
 protected:
+	
+	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
+	virtual TArray<FPCGPinProperties> OutputPinProperties() const override;
+	
+	virtual bool HasDynamicPins() const override
+	{
+		return true;
+	}
+	
 	virtual bool SupportsDataStealing() const override
 	{
 		return true;
 	}
 
 	virtual FPCGElementPtr CreateElement() const override;
+
 	//~End UPCGSettings
 
 public:
@@ -43,17 +53,17 @@ public:
 
 	/** List of attributes to delete. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, ShowOnlyInnerProperties))
-	FPCGExCarryOverDetails Filters;
+	FPCGExCarryOverDetails Filters = FPCGExCarryOverDetails(true);
 };
 
-struct FPCGExMetaCleanupContext final : FPCGExPointsProcessorContext
+struct FPCGExMetaCleanupContext final : FPCGExContext
 {
 	friend class FPCGExMetaCleanupElement;
 
 	FPCGExCarryOverDetails Filters;
 };
 
-class FPCGExMetaCleanupElement final : public FPCGExPointsProcessorElement
+class FPCGExMetaCleanupElement final : public IPCGExElement
 {
 protected:
 	PCGEX_ELEMENT_CREATE_CONTEXT(MetaCleanup)

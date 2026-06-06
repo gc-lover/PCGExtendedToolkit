@@ -5,6 +5,7 @@
 
 #include "PCGComponent.h"
 #include "PCGExCoreMacros.h"
+#include "PCGExSubSystem.h"
 #include "PCGManagedResource.h"
 #include "Async/Async.h"
 #include "Containers/PCGExManagedObjects.h"
@@ -124,7 +125,7 @@ TSharedPtr<PCGExMT::FTaskManager> FPCGExContext::GetTaskManager()
 	{
 		FWriteScopeLock WriteLock(AsyncLock);
 		TaskManager = MakeShared<PCGExMT::FTaskManager>(this);
-		TaskManager->OnEndCallback = [CtxHandle = GetOrCreateHandle()](const bool bWasCancelled)
+		TaskManager->OnEndCallback = [CtxHandle = GetWeakSelfHandle()](const bool bWasCancelled)
 		{
 			if (bWasCancelled)
 			{
@@ -167,8 +168,14 @@ bool FPCGExContext::IsRuntimeGen() const
 
 FPCGExContext::FPCGExContext()
 {
+	// Create the PCG handle once, up front: the single source of truth for this context's lifetime,
+	// read everywhere via GetWeakSelfHandle() so it is never resurrected after Release(). Must run
+	// before ManagedObjects, which captures it.
+	SelfHandle = GetOrCreateHandle();
+	AsyncPinTracker = MakeShared<PCGExMT::FAsyncContextPinTracker>();
+
 	WorkHandle = MakeShared<PCGEx::FWorkHandle>();
-	ManagedObjects = MakeShared<PCGEx::FManagedObjects>(this, WorkHandle);
+	ManagedObjects = MakeShared<PCGEx::FManagedObjects>(SelfHandle, WorkHandle);
 	UniqueNameGenerator = MakeShared<FPCGExUniqueNameGenerator>();
 	BufferProxyPool = MakeShared<PCGExData::IBufferProxyPool>();
 }
@@ -330,7 +337,7 @@ bool FPCGExContext::TryComplete(const bool bForce)
 
 void FPCGExContext::OnAsyncWorkEnd(const bool bWasCancelled)
 {
-	PCGEX_SHARED_CONTEXT_VOID(GetOrCreateHandle());
+	PCGEX_SHARED_CONTEXT_VOID(GetWeakSelfHandle());
 
 	if (bWasCancelled || IsWorkCancelled())
 	{
@@ -416,11 +423,11 @@ bool FPCGExContext::LoadAssets()
 
 	PCGExHelpers::Load(
 		GetTaskManager(),
-		[CtxHandle = GetOrCreateHandle()]() -> TArray<FSoftObjectPath>
+		[CtxHandle = GetWeakSelfHandle()]() -> TArray<FSoftObjectPath>
 		{
 			PCGEX_SHARED_CONTEXT_RET(CtxHandle, {})
 			return SharedContext.Get()->RequiredAssets->Array();
-		}, [CtxHandle = GetOrCreateHandle()](const bool bSuccess, TSharedPtr<FStreamableHandle> StreamableHandle)
+		}, [CtxHandle = GetWeakSelfHandle()](const bool bSuccess, TSharedPtr<FStreamableHandle> StreamableHandle)
 		{
 			PCGEX_SHARED_CONTEXT_VOID(CtxHandle)
 			SharedContext.Get()->TrackAssetsHandle(StreamableHandle);
@@ -541,12 +548,68 @@ bool FPCGExContext::CanExecute() const
 	return !InputData.bCancelExecution && !IsWorkCancelled() && !IsWorkCompleted();
 }
 
+namespace PCGExContextFinalize
+{
+	// After a mid-flight cancel, holds the context alive via a strong handle pin and drops it from a
+	// game-thread tick once the pin count hits 0 -- so the context's UObject/GC teardown runs on the
+	// game thread, never a worker. See FPCGExContext::CancelExecution and FAsyncContextPinTracker.
+	class FGameThreadFinalizer : public TSharedFromThis<FGameThreadFinalizer>
+	{
+		TSharedPtr<FPCGContextHandle> Pin;
+		TSharedPtr<PCGExMT::FAsyncContextPinTracker> Tracker;
+
+	public:
+		FGameThreadFinalizer(TSharedPtr<FPCGContextHandle> InPin, TSharedPtr<PCGExMT::FAsyncContextPinTracker> InTracker)
+			: Pin(MoveTemp(InPin))
+			  , Tracker(MoveTemp(InTracker))
+		{
+		}
+
+		// Queues the next poll on the game thread; never drops the pin synchronously, so it is safe to
+		// call inline from CancelExecution (a method on the very context being kept alive).
+		static void ScheduleNextPoll(const TSharedPtr<FGameThreadFinalizer>& Self)
+		{
+			if (UPCGExSubSystem* Subsystem = UPCGExSubSystem::GetSubsystemForCurrentWorld())
+			{
+				Subsystem->RegisterBeginTickAction([Self]() { Self->PollGameThread(); });
+			}
+			else
+			{
+				// No subsystem to tick on (e.g. world teardown). Re-enter via the game-thread task queue
+				// instead of dropping the pin here: tasks may still be pinning the context (Num() > 0),
+				// and PollGameThread is the single place that drops it -- on the game thread, at Num()==0.
+				AsyncTask(ENamedThreads::GameThread, [Self]() { Self->PollGameThread(); });
+			}
+		}
+
+		// Runs on the subsystem's game-thread tick.
+		void PollGameThread()
+		{
+			if (!Pin)
+			{
+				return;
+			}
+
+			if (!Tracker || Tracker->Num() == 0)
+			{
+				// All async tasks have released the context: drop the keep-alive here. If it is the
+				// last reference, the context is destroyed now -- on the game thread, not on a worker.
+				Pin.Reset();
+				return;
+			}
+
+			// Pins still outstanding -- poll again next frame.
+			ScheduleNextPoll(SharedThis(this));
+		}
+	};
+}
+
 bool FPCGExContext::CancelExecution(const FString& InReason)
 {
 	bool bExpected = false;
 	if (bWorkCancelled.compare_exchange_strong(bExpected, true, std::memory_order_acq_rel))
 	{
-		FSharedContext<FPCGExContext> SharedContext(GetOrCreateHandle());
+		FSharedContext<FPCGExContext> SharedContext(GetWeakSelfHandle());
 
 		if (!bQuietCancellationError && !InReason.IsEmpty())
 		{
@@ -554,6 +617,19 @@ bool FPCGExContext::CancelExecution(const FString& InReason)
 		}
 
 		PCGEX_TERMINATE_ASYNC
+
+		// Mid-flight cancel: PCG releases this context on the game thread while async tasks may still
+		// be pinning it, so the last task to release would otherwise destroy it off-thread. Keep it
+		// pinned and let FGameThreadFinalizer drop the pin from a game-thread tick once all pins are
+		// gone. No-op when nothing is in flight.
+		if (TSharedPtr<FPCGContextHandle> KeepAlive = GetWeakSelfHandle().Pin())
+		{
+			PCGExMT::ExecuteOnMainThread(
+				[Finalizer = MakeShared<PCGExContextFinalize::FGameThreadFinalizer>(KeepAlive, AsyncPinTracker)]()
+				{
+					PCGExContextFinalize::FGameThreadFinalizer::ScheduleNextPoll(Finalizer);
+				});
+		}
 
 		OutputData.Reset();
 		if (bPropagateAbortedExecution)
