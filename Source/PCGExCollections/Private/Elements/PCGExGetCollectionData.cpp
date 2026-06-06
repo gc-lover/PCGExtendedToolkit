@@ -116,6 +116,14 @@ FPCGElementPtr UPCGExGetCollectionDataSettings::CreateElement() const
 	return MakeShared<FPCGExGetCollectionDataElement>();
 }
 
+
+#if WITH_EDITOR
+TArray<FText> UPCGExGetCollectionDataSettings::GetNodeTitleAliases() const
+{
+	return {FTEXT("PCGEx | Asset Collection to Set"), FTEXT("PCGEx | Collection to Module Infos")};
+}
+#endif
+
 #if PCGEX_ENGINE_VERSION < 507
 EPCGDataType UPCGExGetCollectionDataSettings::GetCurrentPinTypes(const UPCGPin* InPin) const
 {
@@ -937,6 +945,14 @@ namespace PCGExGetCollectionData
 			{
 				TRACE_CPUPROFILER_EVENT_SCOPE(GetCollectionData_Write);
 				WriteFromEntries(U, P);
+			}
+			// Schema-property annotation (@Data): mirrors the FromInputs PerInputData branch -- one
+			// value per attribute, stamped onto the output param data.
+			if (Settings->SchemaPropertyAnnotations.HasOutputs())
+			{
+				TRACE_CPUPROFILER_EVENT_SCOPE(GetCollectionData_WriteSchemaToDataDomain);
+				PCGExCollections::WriteSchemaToDataDomain(
+					InContext, Settings->SchemaPropertyAnnotations, MainCollection, U.OutputSet);
 			}
 		}
 

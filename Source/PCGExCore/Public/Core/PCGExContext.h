@@ -57,6 +57,16 @@ protected:
 
 	TSharedPtr<PCGEx::FWorkHandle> WorkHandle;
 	const IPCGExElement* ElementHandle = nullptr;
+
+	// This context's own PCG handle, captured once at construction. Read it via GetWeakSelfHandle(),
+	// never GetOrCreateHandle(): after Release() nulls the handle, GetOrCreateHandle() would resurrect
+	// a second one bound to the released context and trip ~FPCGContext's ensure(!Handle).
+	TWeakPtr<FPCGContextHandle> SelfHandle;
+
+	// Counts in-flight async tasks pinning this context. Read only by the cancel-time game-thread
+	// finalizer (see CancelExecution) to know when destruction can be deferred onto the game thread.
+	TSharedPtr<PCGExMT::FAsyncContextPinTracker> AsyncPinTracker;
+
 	int32 LoopIndex = INDEX_NONE;
 	int32 TopLoopIndex = INDEX_NONE;
 	
@@ -68,6 +78,14 @@ public:
 	{
 		return WorkHandle;
 	}
+
+	// Non-creating handle accessor. Returns an invalid weak ptr once the context is released -- the
+	// "context is gone, bail out" signal for the PCGEX_SHARED_CONTEXT* guards. Use for all self-pinning.
+	const TWeakPtr<FPCGContextHandle>& GetWeakSelfHandle() const { return SelfHandle; }
+
+	// Shared pin counter; async task bodies bracket their pinned region with an FAsyncContextPinScope
+	// built from this.
+	const TSharedPtr<PCGExMT::FAsyncContextPinTracker>& GetAsyncPinTracker() const { return AsyncPinTracker; }
 
 	TSharedPtr<PCGEx::FManagedObjects> ManagedObjects;
 
@@ -87,6 +105,13 @@ public:
 	bool bPropagateAbortedExecution = false;
 	
 	FPCGExContext();
+
+	// Non-copyable / non-movable: SelfHandle and the base Handle both bind to THIS instance (the
+	// handle stores `this` and owns the context), so a copy would dangle or double-delete.
+	FPCGExContext(const FPCGExContext&) = delete;
+	FPCGExContext& operator=(const FPCGExContext&) = delete;
+	FPCGExContext(FPCGExContext&&) = delete;
+	FPCGExContext& operator=(FPCGExContext&&) = delete;
 
 	virtual ~FPCGExContext() override;
 

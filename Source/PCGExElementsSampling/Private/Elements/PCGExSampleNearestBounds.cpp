@@ -45,6 +45,19 @@ UPCGExSampleNearestBoundsSettings::UPCGExSampleNearestBoundsSettings(const FObje
 	}
 }
 
+#if WITH_EDITOR
+void UPCGExSampleNearestBoundsSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+#endif
+
+FName UPCGExSampleNearestBoundsSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
+}
+
 TArray<FPCGPinProperties> UPCGExSampleNearestBoundsSettings::InputPinProperties() const
 {
 	TArray<FPCGPinProperties> PinProperties = Super::InputPinProperties();
@@ -131,7 +144,7 @@ bool FPCGExSampleNearestBoundsElement::Boot(FPCGExContext* InContext) const
 			Context->Collections.Add(Collection);
 
 			CollectionBuildingTasks.Execute(
-				[CtxHandle = Context->GetOrCreateHandle(), Collection, Facade, BoundsSource = Settings->BoundsSource]()
+				[CtxHandle = Context->GetWeakSelfHandle(), Collection, Facade, BoundsSource = Settings->BoundsSource]()
 				{
 					PCGEX_SHARED_CONTEXT_VOID(CtxHandle);
 					Collection->BuildFrom(Facade->Source, BoundsSource);
@@ -162,7 +175,7 @@ bool FPCGExSampleNearestBoundsElement::AdvanceWork(FPCGExContext* InContext, con
 	{
 		Context->SetState(PCGExCommon::States::State_FacadePreloading);
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetOrCreateHandle();
+		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetWeakSelfHandle();
 		Context->TargetsHandler->TargetsPreloader->OnCompleteCallback = [Settings, Context, WeakHandle]()
 		{
 			PCGEX_SHARED_CONTEXT_VOID(WeakHandle)

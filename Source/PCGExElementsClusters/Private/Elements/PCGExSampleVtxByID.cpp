@@ -14,6 +14,7 @@
 #include "Details/PCGExSettingsDetails.h"
 #include "Graphs/PCGExGraph.h"
 #include "Math/PCGExMathDistances.h"
+#include "Sampling/PCGExSamplingCommon.h"
 #include "Sampling/PCGExSamplingUnionData.h"
 
 #define LOCTEXT_NAMESPACE "PCGExSampleVtxByIDElement"
@@ -24,6 +25,19 @@ PCGEX_SETTING_VALUE_IMPL(UPCGExSampleVtxByIDSettings, LookAtUp, FVector, LookAtU
 UPCGExSampleVtxByIDSettings::UPCGExSampleVtxByIDSettings(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+}
+
+#if WITH_EDITOR
+void UPCGExSampleVtxByIDSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+#endif
+
+FName UPCGExSampleVtxByIDSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
 }
 
 TArray<FPCGPinProperties> UPCGExSampleVtxByIDSettings::InputPinProperties() const
@@ -105,7 +119,7 @@ bool FPCGExSampleVtxByIDElement::AdvanceWork(FPCGExContext* InContext, const UPC
 	{
 		Context->SetState(PCGExCommon::States::State_FacadePreloading);
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetOrCreateHandle();
+		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetWeakSelfHandle();
 		Context->TargetsPreloader->OnCompleteCallback = [Settings, Context, WeakHandle]()
 		{
 			// TODO : Need to revisit this, it's likely way too slow

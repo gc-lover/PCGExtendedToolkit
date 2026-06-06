@@ -8,7 +8,22 @@
 #define LOCTEXT_NAMESPACE "PCGExMetaCleanupElement"
 #define PCGEX_NAMESPACE MetaCleanup
 
+TArray<FPCGPinProperties> UPCGExMetaCleanupSettings::InputPinProperties() const
+{
+	TArray<FPCGPinProperties> PinProperties;
+	PCGEX_PIN_ANY(PCGPinConstants::DefaultInputLabel, "", Required)
+	return PinProperties;
+}
+
+TArray<FPCGPinProperties> UPCGExMetaCleanupSettings::OutputPinProperties() const
+{
+	TArray<FPCGPinProperties> PinProperties;
+	PCGEX_PIN_ANY(PCGPinConstants::DefaultOutputLabel, "", Required)
+	return PinProperties;
+}
+
 PCGEX_INITIALIZE_ELEMENT(MetaCleanup)
+
 
 PCGExData::EIOInit UPCGExMetaCleanupSettings::GetMainDataInitializationPolicy() const
 {
@@ -17,7 +32,7 @@ PCGExData::EIOInit UPCGExMetaCleanupSettings::GetMainDataInitializationPolicy() 
 
 bool FPCGExMetaCleanupElement::Boot(FPCGExContext* InContext) const
 {
-	if (!FPCGExPointsProcessorElement::Boot(InContext))
+	if (!IPCGExElement::Boot(InContext))
 	{
 		return false;
 	}
@@ -41,27 +56,86 @@ bool FPCGExMetaCleanupElement::AdvanceWork(FPCGExContext* InContext, const UPCGE
 		return true;
 	}
 
+	const int32 NumInputs = Context->InputData.TaggedData.Num();
+	Context->OutputData.TaggedData.Reserve(NumInputs);
+
 	if (Context->Filters.Attributes.FilterMode == EPCGExAttributeFilter::All)
 	{
-		while (Context->AdvancePointsIO())
+		for (int i = 0; i < NumInputs; i++)
 		{
-			Context->CurrentIO->InitializeOutput(PCGExData::EIOInit::Forward);
-			Context->Filters.Prune(Context->CurrentIO->Tags.Get());
+			const FPCGTaggedData& InData = Context->InputData.TaggedData[i];
+			FPCGTaggedData& OutData = Context->OutputData.TaggedData.Emplace_GetRef(InData.Data);
+			OutData.Pin = PCGPinConstants::DefaultOutputLabel;
+			OutData.Tags = InData.Tags;
+
+			Context->Filters.Prune(OutData.Tags);
 		}
 	}
 	else
 	{
-		while (Context->AdvancePointsIO())
+
+		TArray<FPCGAttributeIdentifier> Identifiers;
+		Identifiers.Reserve(12);
+		
+		switch (Settings->GetMainDataInitializationPolicy())
 		{
-			// TODO : Check if any attribute is affected first, and forward instead of duplicate if not.
-			Context->CurrentIO->InitializeOutput(Settings->GetMainDataInitializationPolicy());
-			Context->Filters.Prune(Context->CurrentIO.Get());
+		case PCGExData::EIOInit::NoInit:
+		case PCGExData::EIOInit::New:
+		case PCGExData::EIOInit::Duplicate:
+			for (int i = 0; i < NumInputs; i++)
+			{
+				const FPCGTaggedData& InData = Context->InputData.TaggedData[i];
+
+				if (Context->Filters.GetPrunableIdentifiers(InData.Data->ConstMetadata(), Identifiers))
+				{
+					UPCGData* NewOutData = InData.Data->DuplicateData(Context, true);
+					UPCGMetadata* Metadata = NewOutData->MutableMetadata();
+
+					for (const FPCGAttributeIdentifier& Identifier : Identifiers)
+					{
+						Metadata->DeleteAttribute(Identifier);
+					}
+
+					FPCGTaggedData& OutData = Context->OutputData.TaggedData.Emplace_GetRef(NewOutData);
+					OutData.Pin = PCGPinConstants::DefaultOutputLabel;
+					OutData.Tags = InData.Tags;
+					Context->Filters.Prune(OutData.Tags);
+				}
+				else
+				{
+					FPCGTaggedData& OutData = Context->OutputData.TaggedData.Emplace_GetRef(InData.Data);
+					OutData.Pin = PCGPinConstants::DefaultOutputLabel;
+					OutData.Tags = InData.Tags;
+					Context->Filters.Prune(OutData.Tags);
+				}
+			}
+			break;
+		case PCGExData::EIOInit::Forward:
+			for (int i = 0; i < NumInputs; i++)
+			{
+				const FPCGTaggedData& InData = Context->InputData.TaggedData[i];
+				UPCGData* NewOutData = const_cast<UPCGData*>(InData.Data.Get());
+
+				FPCGTaggedData& OutData = Context->OutputData.TaggedData.Emplace_GetRef(NewOutData);
+
+				OutData.Pin = PCGPinConstants::DefaultOutputLabel;
+				OutData.Tags = InData.Tags;
+				Context->Filters.Prune(OutData.Tags);
+
+				if (Context->Filters.GetPrunableIdentifiers(NewOutData->MutableMetadata(), Identifiers))
+				{
+					for (const FPCGAttributeIdentifier& Identifier : Identifiers)
+					{
+						NewOutData->Metadata->DeleteAttribute(Identifier);
+					}
+				}
+
+			}
+			break;
 		}
 	}
 
-	Context->MainPoints->StageOutputs();
 	Context->Done();
-
 	return Context->TryComplete();
 }
 
