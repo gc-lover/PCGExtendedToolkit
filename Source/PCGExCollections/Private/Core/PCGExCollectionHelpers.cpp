@@ -313,10 +313,6 @@ namespace PCGExCollectionHelpers
 						TargetEntry->bIsSubCollection = false;
 						TargetEntry->VariationMode = Entry->VariationMode;
 						TargetEntry->Variations = Entry->Variations;
-						TargetEntry->ScaleToFitSource = Entry->ScaleToFitSource;
-						TargetEntry->ScaleToFit = Entry->ScaleToFit;
-						TargetEntry->JustificationSource = Entry->JustificationSource;
-						TargetEntry->Justification = Entry->Justification;
 						TargetEntry->GrammarSource = Entry->GrammarSource;
 						TargetEntry->AssetGrammar = Entry->AssetGrammar;
 						TargetEntry->Staging = Entry->Staging;

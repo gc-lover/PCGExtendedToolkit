@@ -4,7 +4,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PCGCommon.h"
 #include "UObject/Object.h"
+
+#include "PCGExFactories.generated.h"
 
 ///
 
@@ -50,8 +53,7 @@ namespace PCGExFactories
 		FillControls,
 		MatchRule,
 		Noise3D,
-		Selector,
-		ValencyBias
+		Selector
 	};
 
 	enum class EPreparationResult : uint8
@@ -71,6 +73,36 @@ namespace PCGExFactories
 	static inline TSet<EType> ClusterStates = {EType::ClusterState, EType::PointState};
 }
 
+
+#pragma region EZ 5.7
+
+// Fake FPCGDataTypeInfo structs
+// Only really exists in 5.7
+
+#define PCG_DECLARE_TYPE_INFO(...)
+#define PCG_ASSIGN_TYPE_INFO(...)
+#define PCG_DEFINE_TYPE_INFO(...)
+
+USTRUCT()
+struct PCGEXCORE_API FPCGDataTypeInfo
+{
+	GENERATED_BODY()
+
+	static EPCGDataType AsId();
+	
+#if WITH_EDITOR
+	virtual bool Hidden() const { return false; }
+#endif // WITH_EDITOR
+};
+
+USTRUCT()
+struct PCGEXCORE_API FPCGDataTypeInfoPoint : public FPCGDataTypeInfo
+{
+	GENERATED_BODY()
+};
+
+#pragma endregion
+
 // TODO : Move this to helper class
 
 namespace PCGExFactories
@@ -82,19 +114,10 @@ namespace PCGExFactories
 	static bool GetInputFactories(FPCGExContext* InContext, const FName InLabel, TArray<TObjectPtr<const T_DEF>>& OutFactories, const TSet<EType>& Types, const bool bRequired = true)
 	{
 		TArray<TObjectPtr<const UPCGExFactoryData>> BaseFactories;
-		if (!GetInputFactories_Internal(InContext, InLabel, BaseFactories, Types, bRequired))
-		{
-			return false;
-		}
+		if (!GetInputFactories_Internal(InContext, InLabel, BaseFactories, Types, bRequired)) { return false; }
 
 		// Cast back to T_DEF
-		for (const TObjectPtr<const UPCGExFactoryData>& Base : BaseFactories)
-		{
-			if (const T_DEF* Derived = Cast<T_DEF>(Base))
-			{
-				OutFactories.Add(Derived);
-			}
-		}
+		for (const TObjectPtr<const UPCGExFactoryData>& Base : BaseFactories) { if (const T_DEF* Derived = Cast<T_DEF>(Base)) { OutFactories.Add(Derived); } }
 
 		return !OutFactories.IsEmpty();
 	}
@@ -110,10 +133,7 @@ namespace PCGExFactories
 	{
 		TArray<TObjectPtr<const UPCGExFactoryData>> BaseFactories;
 		BaseFactories.Reserve(InFactories.Num());
-		for (const TObjectPtr<const T_DEF>& Factory : InFactories)
-		{
-			BaseFactories.Add(Factory);
-		}
+		for (const TObjectPtr<const T_DEF>& Factory : InFactories) { BaseFactories.Add(Factory); }
 		RegisterConsumableAttributesWithData_Internal(BaseFactories, InContext, InData);
 	}
 
@@ -122,10 +142,7 @@ namespace PCGExFactories
 	{
 		TArray<TObjectPtr<const UPCGExFactoryData>> BaseFactories;
 		BaseFactories.Reserve(InFactories.Num());
-		for (const TObjectPtr<const T_DEF>& Factory : InFactories)
-		{
-			BaseFactories.Add(Factory);
-		}
+		for (const TObjectPtr<const T_DEF>& Factory : InFactories) { BaseFactories.Add(Factory); }
 		RegisterConsumableAttributesWithFacade_Internal(BaseFactories, InFacade);
 	}
 }

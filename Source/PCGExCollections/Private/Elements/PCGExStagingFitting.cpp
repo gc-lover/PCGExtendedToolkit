@@ -243,8 +243,6 @@ namespace PCGExStagingFitting
 		};
 
 		const bool bUseMeshAttribute = Settings->Source == EPCGExFittingSource::MeshAttribute;
-		const bool bConsiderEntryScaleToFit = Settings->bConsiderEntryScaleToFit;
-		const bool bConsiderEntryJustification = Settings->bConsiderEntryJustification;
 		const TArray<PCGExValueHash>& KeysRef = MeshKeys ? *MeshKeys.Get() : TArray<PCGExValueHash>{};
 
 		int16 MaterialPick = 0;
@@ -300,27 +298,17 @@ namespace PCGExStagingFitting
 				FBox OutBounds = Entry->Staging.Bounds;
 				const FPCGExFittingVariations& EntryVariations = Entry->GetVariations(EntryHost);
 
-				PCGExFitting::FOverridesView EntryOverrides;
-				if (bConsiderEntryScaleToFit)
-				{
-					EntryOverrides.ScaleToFit = Entry->GetScaleToFitOverride(EntryHost);
-				}
-				if (bConsiderEntryJustification)
-				{
-					EntryOverrides.Justification = Entry->GetJustificationOverride(EntryHost);
-				}
-
 				RandomSource.Initialize(PCGExRandomHelpers::GetSeed(Seeds[Index], Variations.Seed));
 
 				if (Variations.bEnabledBefore)
 				{
 					FTransform LocalXForm = FTransform::Identity;
 					Variations.Apply(RandomSource, LocalXForm, EntryVariations, EPCGExVariationMode::Before);
-					FittingHandler.ComputeLocalTransform(Index, LocalXForm, OutTransform, OutBounds, OutTranslation, EntryOverrides);
+					FittingHandler.ComputeLocalTransform(Index, LocalXForm, OutTransform, OutBounds, OutTranslation);
 				}
 				else
 				{
-					FittingHandler.ComputeTransform(Index, OutTransform, OutBounds, OutTranslation, true, EntryOverrides);
+					FittingHandler.ComputeTransform(Index, OutTransform, OutBounds, OutTranslation);
 				}
 
 				if (TranslationWriter)

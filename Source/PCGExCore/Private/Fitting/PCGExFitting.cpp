@@ -11,10 +11,67 @@
 
 void FPCGExScaleToFitDetails::Process(const PCGExData::FPoint& InPoint, const FBox& InBounds, FVector& OutScale, FBox& OutBounds) const
 {
-	PCGExFitting::ScaleToFitAxes(
-		ScaleToFitMode, ScaleToFit, ScaleToFitX, ScaleToFitY, ScaleToFitZ,
-		InPoint.GetLocalBounds().GetSize(), InPoint.GetTransform().GetScale3D(),
-		InBounds, OutScale, OutBounds);
+	if (ScaleToFitMode == EPCGExFitMode::None)
+	{
+		return;
+	}
+
+	const FVector TargetSize = InPoint.GetLocalBounds().GetSize();
+	const FVector TargetScale = InPoint.GetTransform().GetScale3D();
+	const FVector TargetSizeScaled = TargetSize * TargetScale;
+	const FVector CandidateSize = InBounds.GetSize();
+
+	const double XFactor = TargetSizeScaled.X / CandidateSize.X;
+	const double YFactor = TargetSizeScaled.Y / CandidateSize.Y;
+	const double ZFactor = TargetSizeScaled.Z / CandidateSize.Z;
+
+	// Pack all three uniform scale options into a single FVector:
+	// X = smallest axis ratio (Min), Y = largest (Max), Z = average (Avg).
+	// ScaleToFitAxis indexes into this vector to pick the desired uniform mode.
+	const FVector FitMinMax = FVector(FMath::Min3(XFactor, YFactor, ZFactor), FMath::Max3(XFactor, YFactor, ZFactor), (XFactor + YFactor + ZFactor) / 3);
+
+	OutBounds.Min = InBounds.Min;
+	OutBounds.Max = InBounds.Max;
+
+
+	if (ScaleToFitMode == EPCGExFitMode::Uniform)
+	{
+		ScaleToFitAxis(ScaleToFit, 0, TargetScale, TargetSize, CandidateSize, FitMinMax, OutScale);
+		ScaleToFitAxis(ScaleToFit, 1, TargetScale, TargetSize, CandidateSize, FitMinMax, OutScale);
+		ScaleToFitAxis(ScaleToFit, 2, TargetScale, TargetSize, CandidateSize, FitMinMax, OutScale);
+	}
+	else
+	{
+		ScaleToFitAxis(ScaleToFitX, 0, TargetScale, TargetSize, CandidateSize, FitMinMax, OutScale);
+		ScaleToFitAxis(ScaleToFitY, 1, TargetScale, TargetSize, CandidateSize, FitMinMax, OutScale);
+		ScaleToFitAxis(ScaleToFitZ, 2, TargetScale, TargetSize, CandidateSize, FitMinMax, OutScale);
+	}
+}
+
+void FPCGExScaleToFitDetails::ScaleToFitAxis(const EPCGExScaleToFit Fit, const int32 Axis, const FVector& TargetScale, const FVector& TargetSize, const FVector& CandidateSize, const FVector& MinMaxFit, FVector& OutScale)
+{
+	const double Scale = TargetScale[Axis];
+	double FinalScale = Scale;
+
+	switch (Fit)
+	{
+	default: case EPCGExScaleToFit::None:
+		break;
+	case EPCGExScaleToFit::Fill:
+		FinalScale = ((TargetSize[Axis] * Scale) / CandidateSize[Axis]);
+		break;
+	case EPCGExScaleToFit::Min:
+		FinalScale = MinMaxFit[0];
+		break;
+	case EPCGExScaleToFit::Max:
+		FinalScale = MinMaxFit[1];
+		break;
+	case EPCGExScaleToFit::Avg:
+		FinalScale = MinMaxFit[2];
+		break;
+	}
+
+	OutScale[Axis] = FinalScale;
 }
 
 FPCGExSingleJustifyDetails::FPCGExSingleJustifyDetails()
@@ -67,10 +124,57 @@ bool FPCGExSingleJustifyDetails::Init(FPCGExContext* InContext, const TSharedRef
 
 void FPCGExSingleJustifyDetails::JustifyAxis(const int32 Axis, const int32 Index, const FVector& InCenter, const FVector& InSize, const FVector& OutCenter, const FVector& OutSize, FVector& OutTranslation) const
 {
+	double Start = 0;
+	double End = 0;
+
+	const double HalfOutSize = OutSize[Axis] * 0.5;
+	const double HalfInSize = InSize[Axis] * 0.5;
 	const double FromValue = SharedFromGetter ? SharedFromGetter->Read(Index)[Axis] : FromGetter->Read(Index);
 	const double ToValue = SharedToGetter ? SharedToGetter->Read(Index)[Axis] : ToGetter->Read(Index);
 
-	PCGExFitting::JustifyAxis(From, To, FromValue, ToValue, Axis, InCenter, InSize, OutCenter, OutSize, OutTranslation);
+	switch (From)
+	{
+	default: case EPCGExJustifyFrom::Min:
+		Start = OutCenter[Axis] - HalfOutSize;
+		break;
+	case EPCGExJustifyFrom::Center:
+		Start = OutCenter[Axis];
+		break;
+	case EPCGExJustifyFrom::Max:
+		Start = OutCenter[Axis] + HalfOutSize;
+		break;
+	case EPCGExJustifyFrom::Custom:
+		Start = OutCenter[Axis] - HalfOutSize + (OutSize[Axis] * FromValue);
+		break;
+	case EPCGExJustifyFrom::Pivot:
+		Start = 0;
+		break;
+	}
+
+	switch (To)
+	{
+	default: case EPCGExJustifyTo::Min:
+		End = InCenter[Axis] - HalfInSize;
+		break;
+	case EPCGExJustifyTo::Center:
+		End = InCenter[Axis];
+		break;
+	case EPCGExJustifyTo::Max:
+		End = InCenter[Axis] + HalfInSize;
+		break;
+	case EPCGExJustifyTo::Custom:
+		End = InCenter[Axis] - HalfInSize + (InSize[Axis] * ToValue);
+		break;
+	case EPCGExJustifyTo::Same:
+		// == Custom but using From values
+		End = InCenter[Axis] - HalfInSize * (InSize[Axis] * FromValue);
+		break;
+	case EPCGExJustifyTo::Pivot:
+		End = 0;
+		break;
+	}
+
+	OutTranslation[Axis] = End - Start;
 }
 
 void FPCGExJustificationDetails::Process(const int32 Index, const FBox& InBounds, const FBox& OutBounds, FVector& OutTranslation) const
@@ -108,7 +212,7 @@ bool FPCGExJustificationDetails::Init(FPCGExContext* InContext, const TSharedRef
 
 	if (bSharedCustomToAttribute)
 	{
-		SharedToGetter = CustomTo.GetValueSetting();
+		SharedToGetter = CustomFrom.GetValueSetting();
 		if (!SharedToGetter->Init(InDataFacade))
 		{
 			return false;
@@ -197,7 +301,7 @@ bool FPCGExFittingDetailsHandler::Init(FPCGExContext* InContext, const TSharedRe
 	return Justification.Init(InContext, InTargetFacade);
 }
 
-void FPCGExFittingDetailsHandler::ComputeTransform(const int32 TargetIndex, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation, const bool bWorldSpace, const PCGExFitting::FOverridesView& InOverrides) const
+void FPCGExFittingDetailsHandler::ComputeTransform(const int32 TargetIndex, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation, const bool bWorldSpace) const
 {
 	//
 	check(TargetDataFacade);
@@ -211,32 +315,14 @@ void FPCGExFittingDetailsHandler::ComputeTransform(const int32 TargetIndex, FTra
 	FVector OutScale = OutTransform.GetScale3D();
 	OutTranslation = FVector::ZeroVector;
 
-	if (InOverrides.ScaleToFit)
-	{
-		InOverrides.ScaleToFit->Process(TargetPoint, InOutBounds, OutScale, InOutBounds);
-	}
-	else
-	{
-		ScaleToFit.Process(TargetPoint, InOutBounds, OutScale, InOutBounds);
-	}
-
-	const FBox TargetBounds = PCGExMath::GetLocalBounds<EPCGExPointBoundsSource::ScaledBounds>(TargetPoint);
-	const FBox FittedBounds = FBox(InOutBounds.Min * OutScale, InOutBounds.Max * OutScale);
-
-	if (InOverrides.Justification)
-	{
-		InOverrides.Justification->Process(TargetBounds, FittedBounds, OutTranslation);
-	}
-	else
-	{
-		Justification.Process(TargetIndex, TargetBounds, FittedBounds, OutTranslation);
-	}
+	ScaleToFit.Process(TargetPoint, InOutBounds, OutScale, InOutBounds);
+	Justification.Process(TargetIndex, PCGExMath::GetLocalBounds<EPCGExPointBoundsSource::ScaledBounds>(TargetPoint), FBox(InOutBounds.Min * OutScale, InOutBounds.Max * OutScale), OutTranslation);
 
 	OutTransform.AddToTranslation(OutTransform.GetRotation().RotateVector(OutTranslation));
 	OutTransform.SetScale3D(OutScale);
 }
 
-void FPCGExFittingDetailsHandler::ComputeLocalTransform(const int32 TargetIndex, const FTransform& InLocalXForm, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation, const PCGExFitting::FOverridesView& InOverrides) const
+void FPCGExFittingDetailsHandler::ComputeLocalTransform(const int32 TargetIndex, const FTransform& InLocalXForm, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation) const
 {
 	// Computes a final world transform for placing a candidate asset at a target point,
 	// incorporating: (1) the candidate's local pre-rotation/scale, (2) scale-to-fit against
@@ -255,14 +341,7 @@ void FPCGExFittingDetailsHandler::ComputeLocalTransform(const int32 TargetIndex,
 
 	// FITTING: Use only-scaled bounds to compute correct per-axis scale factors
 	const FBox ScaledBounds(InOutBounds.Min * LocalScale, InOutBounds.Max * LocalScale);
-	if (InOverrides.ScaleToFit)
-	{
-		InOverrides.ScaleToFit->Process(TargetPoint, ScaledBounds, OutScale, InOutBounds);
-	}
-	else
-	{
-		ScaleToFit.Process(TargetPoint, ScaledBounds, OutScale, InOutBounds);
-	}
+	ScaleToFit.Process(TargetPoint, ScaledBounds, OutScale, InOutBounds);
 
 	// JUSTIFICATION: Compute where the rotated asset will actually be positioned
 	// Start with fitted bounds (scaled by both local scale and fitting scale)
@@ -274,21 +353,11 @@ void FPCGExFittingDetailsHandler::ComputeLocalTransform(const int32 TargetIndex,
 		JustificationBounds = JustificationBounds.TransformBy(FTransform(LocalRotation));
 	}
 
-	if (InOverrides.Justification)
-	{
-		InOverrides.Justification->Process(
-			PCGExMath::GetLocalBounds<EPCGExPointBoundsSource::ScaledBounds>(TargetPoint),
-			JustificationBounds,
-			OutTranslation);
-	}
-	else
-	{
-		Justification.Process(
-			TargetIndex,
-			PCGExMath::GetLocalBounds<EPCGExPointBoundsSource::ScaledBounds>(TargetPoint),
-			JustificationBounds,
-			OutTranslation);
-	}
+	Justification.Process(
+		TargetIndex,
+		PCGExMath::GetLocalBounds<EPCGExPointBoundsSource::ScaledBounds>(TargetPoint),
+		JustificationBounds,
+		OutTranslation);
 
 	// Update output bounds to reflect the final AABB
 	InOutBounds = JustificationBounds;

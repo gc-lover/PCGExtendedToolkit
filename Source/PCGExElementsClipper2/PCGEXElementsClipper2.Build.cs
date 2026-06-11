@@ -31,7 +31,6 @@ public class PCGExElementsClipper2 : ModuleRules
 				"PCGExFoundations",
 				"PCGExCollections", // FinalizeSpawnedActor / managed-actor spawn helpers (Clipper2 : Volume)
 				"PCGExElementsClusters", // UPCGExClusterNodesData / cluster labels (Clipper2 : Straight Skeleton)
-				"Chaos" // Clipper 2 Volume
 			}
 		);
 
