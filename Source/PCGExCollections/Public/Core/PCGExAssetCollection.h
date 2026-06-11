@@ -24,6 +24,7 @@ struct FAssetData;
 #endif
 
 class UPCGExAssetCollection;
+class UPCGExCollectionStagingPipeline;
 
 namespace PCGExAssetCollection
 {
@@ -602,6 +603,14 @@ public:
 	/** Get entry by raw Entries array index (bypasses cache). Use for indices from FCategory, packed hashes, etc. */
 	FPCGExEntryAccessResult GetEntryRaw(int32 RawIndex) const;
 
+	/** Mutable access to entry at raw array index (bypasses cache). For programmatic mutation
+	 *  (staging pipeline hooks, the entry Blueprint library). Caller owns Modify /
+	 *  MarkPackageDirty / InvalidateCache as appropriate for what it mutates. */
+	FPCGExAssetCollectionEntry* GetMutableEntryRaw(int32 RawIndex)
+	{
+		return GetMutableEntryAtRawIndex(RawIndex);
+	}
+
 #if WITH_EDITOR
 	/** Editor-only mutable access to entry at raw array index. For editor UI direct writes. */
 	FPCGExAssetCollectionEntry* EDITOR_GetMutableEntry(int32 Index)
@@ -824,6 +833,21 @@ protected:
 		bCacheNeedsRebuild = true;
 		InvalidateCache();
 	}
+
+	/** Tail of every user-triggered rebuild session (depth 0 only): runs the native
+	 *  EDITOR_OnPostStagingRebuild virtual first, then the staging pipelines' OnPostRebuild,
+	 *  so the pipelines see post-merge/post-compaction state. Must stay outside the virtual --
+	 *  overrides are not required to call Super. */
+	void EDITOR_FinalizeStagingRebuild();
+
+	/** Staging pipeline hook dispatchers. Run every valid pipeline in array order; no-op when
+	 *  none are assigned, when invoked re-entrantly from inside another hook, or while cooking. */
+	void EDITOR_DispatchPipelinePreRebuild();
+	void EDITOR_DispatchPipelineEntry(int32 EntryIndex, bool bIsSubCollection);
+	void EDITOR_DispatchPipelinePostRebuild();
+
+	/** True when at least one StagingPipelines slot holds a valid pipeline. */
+	bool EDITOR_HasAnyStagingPipeline() const;
 #endif
 
 	static uint32 GenerateNewGUID()
@@ -839,6 +863,19 @@ public:
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(EditAnywhere, Category = Settings, meta=(DisplayPriority=-1, MultiLine))
 	FString Notes;
+
+	/** Optional post-process pipelines invoked around editor staging rebuilds (once before the
+	 *  session, once per re-staged entry, once after the native post-rebuild work). Composable:
+	 *  pipelines run in array order at every hook point, so later pipelines see earlier ones'
+	 *  mutations; null entries are skipped. Use them to drive per-entry property overrides,
+	 *  tags, weights etc. from Blueprint or C++.
+	 *  Editor-only: never serialized into or executed by cooked targets. */
+	UPROPERTY(EditAnywhere, Instanced, Category = Settings)
+	TArray<TObjectPtr<UPCGExCollectionStagingPipeline>> StagingPipelines;
+
+	/** LEGACY single-pipeline slot. Migrated into StagingPipelines by PostLoad. */
+	UPROPERTY(Instanced, meta=(DeprecatedProperty))
+	TObjectPtr<UPCGExCollectionStagingPipeline> StagingPipeline_DEPRECATED;
 #endif
 
 	UPROPERTY(EditAnywhere, Category = Settings, meta=(DisplayPriority=-1))
@@ -955,6 +992,12 @@ protected:
 	 *  to zero. Kept as int32 rather than bool so future nested batch calls work without
 	 *  API changes. */
 	int32 EDITOR_PostStagingRebuildSuppressDepth = 0;
+
+	/** True while a staging pipeline hook executes (TGuardValue pattern). Rebuilds triggered
+	 *  from inside a hook (e.g. a scripted edit routing through PostEditChangeProperty ->
+	 *  EDITOR_RebuildStagingData) run normally but without re-firing pipeline hooks,
+	 *  preventing infinite recursion. Transient. */
+	bool bEDITOR_PipelineDispatchGuard = false;
 #endif
 };
 

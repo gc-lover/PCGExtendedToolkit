@@ -22,7 +22,9 @@
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/FileManager.h"
+#include "Helpers/PCGExCollectionStagingPipeline.h"
 #include "Misc/PackageName.h"
+#include "UObject/Script.h"
 #endif
 
 bool FPCGExEntryAccessResult::IsType(PCGExAssetCollection::FTypeId TypeId) const
@@ -933,6 +935,16 @@ void UPCGExAssetCollection::PostLoad()
 {
 	Super::PostLoad();
 
+#if WITH_EDITORONLY_DATA
+	// Single-pipeline slot migration: the legacy StagingPipeline pointer becomes the first
+	// element of the composable StagingPipelines array. Runs once; subsequent loads no-op.
+	if (StagingPipeline_DEPRECATED)
+	{
+		StagingPipelines.Add(StagingPipeline_DEPRECATED);
+		StagingPipeline_DEPRECATED = nullptr;
+	}
+#endif
+
 #if WITH_EDITOR
 	// Grammar schema migration. Runs once per collection; subsequent loads no-op.
 	if (GrammarSchemaVersion < PCGExAssetCollectionMigration::CurrentGrammarSchemaVersion)
@@ -1372,17 +1384,112 @@ void UPCGExAssetCollection::SyncPropertyOverridesToEntries()
 	});
 }
 
+bool UPCGExAssetCollection::EDITOR_HasAnyStagingPipeline() const
+{
+	for (const TObjectPtr<UPCGExCollectionStagingPipeline>& Pipeline : StagingPipelines)
+	{
+		if (Pipeline)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UPCGExAssetCollection::EDITOR_DispatchPipelinePreRebuild()
+{
+	if (bEDITOR_PipelineDispatchGuard || IsRunningCookCommandlet() || !EDITOR_HasAnyStagingPipeline())
+	{
+		return;
+	}
+
+	// Hooks may mutate entries before some session paths take their own snapshot (the
+	// stale-entry batch only Modifies per entry, inside EDITOR_RebuildEntryStaging) --
+	// snapshot for undo up front. Redundant Modify calls within one transaction are no-ops.
+	Modify(true);
+
+	TGuardValue<bool> DispatchGuard(bEDITOR_PipelineDispatchGuard, true);
+	FEditorScriptExecutionGuard ScriptGuard;
+
+	for (UPCGExCollectionStagingPipeline* Pipeline : StagingPipelines)
+	{
+		if (!Pipeline)
+		{
+			continue;
+		}
+		TGuardValue<TObjectPtr<UPCGExAssetCollection>> TargetCollectionGuard(Pipeline->TargetCollection, this);
+		TGuardValue<int32> TargetIndexGuard(Pipeline->TargetEntryIndex, INDEX_NONE);
+		Pipeline->OnPreRebuild(this);
+	}
+}
+
+void UPCGExAssetCollection::EDITOR_DispatchPipelineEntry(int32 EntryIndex, bool bIsSubCollection)
+{
+	if (bEDITOR_PipelineDispatchGuard || IsRunningCookCommandlet() || !EDITOR_HasAnyStagingPipeline())
+	{
+		return;
+	}
+
+	TGuardValue<bool> DispatchGuard(bEDITOR_PipelineDispatchGuard, true);
+	FEditorScriptExecutionGuard ScriptGuard;
+
+	for (UPCGExCollectionStagingPipeline* Pipeline : StagingPipelines)
+	{
+		if (!Pipeline)
+		{
+			continue;
+		}
+		TGuardValue<TObjectPtr<UPCGExAssetCollection>> TargetCollectionGuard(Pipeline->TargetCollection, this);
+		TGuardValue<int32> TargetIndexGuard(Pipeline->TargetEntryIndex, EntryIndex);
+		Pipeline->OnProcessEntry(this, EntryIndex, bIsSubCollection);
+	}
+}
+
+void UPCGExAssetCollection::EDITOR_DispatchPipelinePostRebuild()
+{
+	if (bEDITOR_PipelineDispatchGuard || IsRunningCookCommandlet() || !EDITOR_HasAnyStagingPipeline())
+	{
+		return;
+	}
+
+	TGuardValue<bool> DispatchGuard(bEDITOR_PipelineDispatchGuard, true);
+	FEditorScriptExecutionGuard ScriptGuard;
+
+	for (UPCGExCollectionStagingPipeline* Pipeline : StagingPipelines)
+	{
+		if (!Pipeline)
+		{
+			continue;
+		}
+		TGuardValue<TObjectPtr<UPCGExAssetCollection>> TargetCollectionGuard(Pipeline->TargetCollection, this);
+		TGuardValue<int32> TargetIndexGuard(Pipeline->TargetEntryIndex, INDEX_NONE);
+		Pipeline->OnPostRebuild(this);
+	}
+}
+
+void UPCGExAssetCollection::EDITOR_FinalizeStagingRebuild()
+{
+	// Native extension point first (actor component schema merges, shared-collection
+	// compaction), then the pipeline so its OnPostRebuild operates on final state.
+	EDITOR_OnPostStagingRebuild();
+	EDITOR_DispatchPipelinePostRebuild();
+}
+
 void UPCGExAssetCollection::EDITOR_RebuildStagingData()
 {
 	Modify(true);
 	InvalidateCache();
+	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
+	{
+		EDITOR_DispatchPipelinePreRebuild();
+	}
 	EDITOR_SanitizeAndRebuildStagingData(false);
 	LastRebuiltUtc = FDateTime::UtcNow();
 	(void)MarkPackageDirty();
 	PCGExEditor::NotifyObjectChanged(this);
 	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
 	{
-		EDITOR_OnPostStagingRebuild();
+		EDITOR_FinalizeStagingRebuild();
 	}
 }
 
@@ -1390,13 +1497,17 @@ void UPCGExAssetCollection::EDITOR_RebuildStagingData_Recursive()
 {
 	Modify(true);
 	InvalidateCache();
+	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
+	{
+		EDITOR_DispatchPipelinePreRebuild();
+	}
 	EDITOR_SanitizeAndRebuildStagingData(true);
 	LastRebuiltUtc = FDateTime::UtcNow();
 	(void)MarkPackageDirty();
 	PCGExEditor::NotifyObjectChanged(this);
 	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
 	{
-		EDITOR_OnPostStagingRebuild();
+		EDITOR_FinalizeStagingRebuild();
 	}
 }
 
@@ -1458,6 +1569,11 @@ int32 UPCGExAssetCollection::EDITOR_RebuildStaleEntries()
 		}
 	});
 
+	if (!StaleIndices.IsEmpty())
+	{
+		EDITOR_DispatchPipelinePreRebuild();
+	}
+
 	{
 		// Suppress per-entry post-rebuild hook firings; emit one tail call after the batch.
 		TGuardValue<int32> SuppressGuard(EDITOR_PostStagingRebuildSuppressDepth, EDITOR_PostStagingRebuildSuppressDepth + 1);
@@ -1468,7 +1584,7 @@ int32 UPCGExAssetCollection::EDITOR_RebuildStaleEntries()
 	}
 	if (!StaleIndices.IsEmpty())
 	{
-		EDITOR_OnPostStagingRebuild();
+		EDITOR_FinalizeStagingRebuild();
 	}
 	return StaleIndices.Num();
 }
@@ -1478,6 +1594,25 @@ bool UPCGExAssetCollection::EDITOR_RebuildEntryStaging(int32 EntryIndex)
 	if (bSuppressStagingRebuild)
 	{
 		return false;
+	}
+
+	if (!IsValidIndex(EntryIndex))
+	{
+		return false;
+	}
+
+	// Hook-initiated restages (e.g. Blueprint RestageEntry called from a StagingPipeline hook)
+	// must be finalize-quiet: the owning session fires EDITOR_FinalizeStagingRebuild once at
+	// its own tail. Standalone calls keep full session semantics (pre-dispatch + finalize).
+	TGuardValue<int32> HookSuppressGuard(
+		EDITOR_PostStagingRebuildSuppressDepth,
+		EDITOR_PostStagingRebuildSuppressDepth + (bEDITOR_PipelineDispatchGuard ? 1 : 0));
+
+	// Direct single-entry sessions fire the pre hook themselves; batch loops (stale entries)
+	// already fired it before suppressing.
+	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
+	{
+		EDITOR_DispatchPipelinePreRebuild();
 	}
 
 	bool bRebuilt = false;
@@ -1491,6 +1626,7 @@ bool UPCGExAssetCollection::EDITOR_RebuildEntryStaging(int32 EntryIndex)
 		InEntry->EDITOR_Sanitize();
 		InEntry->UpdateStaging(this, i, false);
 		InEntry->PostUpdateStaging();
+		EDITOR_DispatchPipelineEntry(i, InEntry->bIsSubCollection);
 		bRebuilt = true;
 	});
 
@@ -1501,7 +1637,7 @@ bool UPCGExAssetCollection::EDITOR_RebuildEntryStaging(int32 EntryIndex)
 		PCGExEditor::NotifyObjectChanged(this);
 		if (EDITOR_PostStagingRebuildSuppressDepth == 0)
 		{
-			EDITOR_OnPostStagingRebuild();
+			EDITOR_FinalizeStagingRebuild();
 		}
 	}
 	return bRebuilt;
@@ -1535,6 +1671,7 @@ void UPCGExAssetCollection::EDITOR_SanitizeAndRebuildStagingData(bool bRecursive
 		InEntry->EDITOR_Sanitize();
 		InEntry->UpdateStaging(this, i, bRecursive);
 		InEntry->PostUpdateStaging();
+		EDITOR_DispatchPipelineEntry(i, InEntry->bIsSubCollection);
 	});
 }
 
