@@ -34,8 +34,14 @@ public:
 	{
 		return EPCGSettingsType::Filter;
 	}
+	
+	virtual TArray<FPCGPreConfiguredSettingsInfo> GetPreconfiguredInfo() const override;
+	virtual bool ShouldDrawNodeCompact() const override;
 #endif
-		
+	
+	virtual void ApplyPreconfiguredSettings(const FPCGPreConfiguredSettingsInfo& PreconfigureInfo) override;
+	virtual FPCGDataTypeIdentifier GetCurrentPinTypesID(const UPCGPin* InPin) const override;
+	
 	/** */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings)
 	bool bCheckOnly = false;

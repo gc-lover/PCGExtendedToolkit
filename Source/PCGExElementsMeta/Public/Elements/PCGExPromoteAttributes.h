@@ -12,10 +12,11 @@
 #include "Core/PCGExSettings.h"
 #include "Data/Utils/PCGExDataForwardDetails.h"
 
-#include "PCGExAttributesToTags.generated.h"
+#include "PCGExPromoteAttributes.generated.h"
 
 class UPCGData;
 class UPCGExPickerFactoryData;
+class UPCGExPropertySchemaAsset;
 
 UENUM()
 enum class EPCGExAttributeToTagsAction : uint8
@@ -103,9 +104,21 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
 	FString CommaSeparatedAttributeSelectors;
 
+	/** Schema assets whose property names are appended to the selectors above. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings)
+	TArray<TObjectPtr<UPCGExPropertySchemaAsset>> IncludedSchemas;
+
 	/** Suppress warning when source has more collections than target. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Warnings and Errors")
 	bool bQuietTooManyCollectionsWarning = false;
+};
+
+/** A non-empty input on a pin: the tagged data (copied by value -- self-contained, no lifetime ties to the
+ * temporary GetInputsByPin array) plus its cached row count. */
+struct FPCGExAttributesToTagsInput
+{
+	FPCGTaggedData Tagged;
+	int32 NumRows = 0;
 };
 
 struct FPCGExAttributesToTagsContext final : FPCGExContext
@@ -120,8 +133,11 @@ struct FPCGExAttributesToTagsContext final : FPCGExContext
 	/** @Data-domain selectors, read as a single value via PCGExData::Helpers::TryReadDataValue (the broadcaster is point-centric and doesn't handle @Data off raw data). Built in Boot. */
 	TArray<FPCGAttributePropertyInputSelector> DataAttributes;
 
-	/** Cross-collection (EntryToCollection / CollectionToCollection): resolved "Tags Source" data + readers, built in Boot. Empty for Self. */
-	TArray<const UPCGData*> Sources;
+	/** All non-empty main inputs (with cached row counts), gathered once in Boot and reused in AdvanceWork. */
+	TArray<FPCGExAttributesToTagsInput> ValidMains;
+
+	/** Cross-collection (EntryToCollection / CollectionToCollection): resolved "Tags Source" data (with cached row counts) + matching readers, built in Boot. Empty for Self. */
+	TArray<FPCGExAttributesToTagsInput> Sources;
 	TArray<FPCGExAttributeToTagDetails> Details;
 };
 

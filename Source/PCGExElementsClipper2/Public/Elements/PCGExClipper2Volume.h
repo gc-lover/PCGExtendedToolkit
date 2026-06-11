@@ -33,7 +33,7 @@ enum class EPCGExVolumeBaseMode : uint8
 };
 
 /** Clipper2 : Volume -- extrudes a concave closed-path footprint into an AVolume, writing each Hertel-Mehlhorn convex piece as a vertical prism in AggGeom.ConvexElems (no BSP, so editor + cooked runtime both work). */
-UCLASS(MinimalAPI, BlueprintType, ClassGroup = (Procedural), Category="PCGEx|Path", meta=(PCGExNodeLibraryDoc="paths/generate/clipper2-volume"))
+UCLASS(MinimalAPI, BlueprintType, ClassGroup = (Procedural), Category="PCGEx|Path", meta=(PCGExNodeLibraryDoc="utilities/clipper2-volume"))
 class UPCGExClipper2VolumeSettings : public UPCGExClipper2ProcessorSettings
 {
 	GENERATED_BODY()
@@ -108,13 +108,13 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Collision", meta = (PCG_Overridable, EditCondition = "bOverrideCollisionProfile"))
 	FName CollisionProfileName = FName("Trigger");
 
-	/** Name of the soft-object-path attribute written to the Actor References output (one entry per spawned volume). */
+	/** Name of the soft-object-path attribute written into each output volume's @Data domain (points at the spawned actor). */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output", meta = (PCG_NotOverridable))
 	FName ActorReferenceAttributeName = FName("ActorReference");
 
 	/** Suppress per-group warnings about degenerate footprints / failed triangulation. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Warnings and Errors", meta = (PCG_NotOverridable))
-	bool bQuietWarnings = false;
+	bool bQuietTriangulationWarnings = false;
 
 	virtual FPCGExGeo2DProjectionDetails GetProjectionDetails() const override;
 
