@@ -36,18 +36,6 @@ void UPCGExCullOnEmptySettings::ApplyPreconfiguredSettings(const FPCGPreConfigur
 	}
 }
 
-FPCGDataTypeIdentifier UPCGExCullOnEmptySettings::GetCurrentPinTypesID(const UPCGPin* InPin) const
-{
-	if (!InPin->IsOutputPin() || InPin->Properties.Label == PCGPinConstants::DefaultOutputLabel)
-	{
-		return Super::GetCurrentPinTypesID(InPin);
-	}
-
-	FPCGDataTypeIdentifier Id = FPCGDataTypeInfoParam::AsId();
-	Id.CustomSubtype = static_cast<int32>(EPCGMetadataTypes::Boolean);
-	return Id;
-}
-
 TArray<FPCGPinProperties> UPCGExCullOnEmptySettings::InputPinProperties() const
 {
 	TArray<FPCGPinProperties> PinProperties;
