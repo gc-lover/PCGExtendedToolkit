@@ -161,7 +161,7 @@ public:
 
 	/** Color associated with constants & nodes that output constant values */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorConstant = FLinearColor(0.2f, 0.2f, 0.2f, 1.0f);
+	FLinearColor ColorConstant = FLinearColor(0.2, 0.2, 0.2, 1.0);
 
 	/** Color associated with debug nodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
@@ -169,147 +169,147 @@ public:
 
 	/** Color associated with misc nodes, that don't really fall in any specific category */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorMisc = FLinearColor(1.0f, 0.6f, 0.28f, 1.0f);
+	FLinearColor ColorMisc = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with misc nodes that usually write new attribute & values to existing data */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorMiscWrite = FLinearColor(1.0f, 0.32f, 0.0f, 1.0f);
+	FLinearColor ColorMiscWrite = FLinearColor(1.000000, 0.316174, 0.000000, 1.000000);
 
 	/** Color associated with nodes that generate new data or split existing data into more data */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorMiscAdd = FLinearColor(1.0f, 0.6f, 0.28f, 1.0f);
+	FLinearColor ColorMiscAdd = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with nodes that remove and delete things */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorMiscRemove = FLinearColor(0.05f, 0.01f, 0.01f, 1.0f);
+	FLinearColor ColorMiscRemove = FLinearColor(0.05, 0.01, 0.01, 1.000000);
 
 	/** Color associated with nodes that grab attributes and value from external sources */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorSampling = FLinearColor(1.0f, 0.25f, 0.0f, 1.0f);
+	FLinearColor ColorSampling = FLinearColor(1.000000, 0.251440, 0.000000, 1.000000);
 
 	/** Color associated with nodes that creates cluster data. */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorClusterGenerator = FLinearColor(0.0f, 0.32f, 1.0f, 1.0f);
+	FLinearColor ColorClusterGenerator = FLinearColor(0.000000, 0.318537, 1.000000, 1.000000);
 
 	/** Color associated with nodes that do operations on clusters */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorClusterOp = FLinearColor(0.0f, 0.67f, 0.76f, 1.0f);
+	FLinearColor ColorClusterOp = FLinearColor(0.000000, 0.670117, 0.760417, 1.000000);
 
 	/** Color associated with nodes that do pathfinding-like operations on clusters */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorPathfinding = FLinearColor(0.24f, 0.58f, 0.37f, 1.0f);
+	FLinearColor ColorPathfinding = FLinearColor(0.243896, 0.578125, 0.371500, 1.000000);
 
 	/** Color associated with nodes that do operations on path-like data */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorPath = FLinearColor(0.0f, 0.24f, 0.16f, 1.0f);
+	FLinearColor ColorPath = FLinearColor(0.000000, 0.239583, 0.160662, 1.000000);
 
 	/** Color associated with nodes that focus solely on filtering data */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilterHub = FLinearColor(0.23f, 1.0f, 0.0f, 1.0f);
+	FLinearColor ColorFilterHub = FLinearColor(0.226841, 1.000000, 0.000000, 1.000000);
 
 	/** Color associated with nodes that focus on spatial transformations */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics")
-	FLinearColor ColorTransform = FLinearColor(1.0f, 0.0f, 0.18f, 1.0f);
+	FLinearColor ColorTransform = FLinearColor(1.000000, 0.000000, 0.185865, 1.000000);
 
 	///// SUBNODES + PINS
 
 	/** Color associated with action subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorAction = FLinearColor(1.0f, 0.59f, 0.10f, 1.0f);
+	FLinearColor ColorAction = FLinearColor(1.000000, 0.592852, 0.105316, 1.000000);
 
 	/** Color associated with blend operations subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorBlendOp = FLinearColor(1.0f, 0.59f, 0.28f, 1.0f);
+	FLinearColor ColorBlendOp = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with match rules subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorMatchRule = FLinearColor(0.02f, 1.0f, 0.04f, 1.0f);
+	FLinearColor ColorMatchRule = FLinearColor(0.020020, 1.000000, 0.036055, 1.000000);
 
 
 	/** Color associated with filter (generic) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Filters", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilter = FLinearColor(0.24f, 0.09f, 0.85f, 1.0f);
+	FLinearColor ColorFilter = FLinearColor(0.24, 0.09, 0.85, 1.000000);
 
 	/** Color associated with filter (points) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Filters", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilterPoint = FLinearColor(0.31f, 0.74f, 0.19f, 1.0f);
+	FLinearColor ColorFilterPoint = FLinearColor(0.312910, 0.744792, 0.186198, 1.000000);
 
 	/** Color associated with filter (collections) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Filters", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilterCollection = FLinearColor(0.31f, 0.74f, 0.18f, 1.0f);
+	FLinearColor ColorFilterCollection = FLinearColor(0.312910, 0.744792, 0.186198, 1.000000);
 
 	/** Color associated with filter (cluster) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Filters", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilterCluster = FLinearColor(0.35f, 0.74f, 0.64f, 1.0f);
+	FLinearColor ColorFilterCluster = FLinearColor(0.351486, 0.744792, 0.647392, 1.000000);
 
 	/** Color associated with filter (vtx) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Filters", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilterVtx = FLinearColor(0.35f, 0.74f, 0.64f, 1.0f);
+	FLinearColor ColorFilterVtx = FLinearColor(0.351486, 0.744792, 0.647392, 1.000000);
 
 	/** Color associated with filter (edges) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Filters", meta=(EditCondition="!bUseNativeColorsIfPossible"))
-	FLinearColor ColorFilterEdge = FLinearColor(0.35f, 0.74f, 0.64f, 1.0f);
+	FLinearColor ColorFilterEdge = FLinearColor(0.351486, 0.744792, 0.647392, 1.000000);
 
 	/** Color associated with Vtx Property subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorVtxProperty = FLinearColor(0.0f, 0.28f, 1.0f, 1.0f);
+	FLinearColor ColorVtxProperty = FLinearColor(0.000000, 0.284980, 1.000000, 1.000000);
 
 	/** Color associated with Neighbor Sampler subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorNeighborSampler = FLinearColor(1.0f, 0.59f, 0.28f, 1.0f);
+	FLinearColor ColorNeighborSampler = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with Fill Control subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorFillControl = FLinearColor(0.31f, 0.74f, 0.18f, 1.0f);
+	FLinearColor ColorFillControl = FLinearColor(0.312910, 0.744792, 0.186198, 1.000000);
 
 	/** Color associated with Heuristics subnodes. */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Heuristics")
-	FLinearColor ColorHeuristics = FLinearColor(0.20f, 0.51f, 0.37f, 1.0f);
+	FLinearColor ColorHeuristics = FLinearColor(0.203896, 0.508125, 0.371500, 1.000000);
 
 	/** Color associated with "Feedback" Heuristics subnodes. */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes|Heuristics")
-	FLinearColor ColorHeuristicsFeedback = FLinearColor(1.0f, 0.31f, 0.0f, 1.0f);
+	FLinearColor ColorHeuristicsFeedback = FLinearColor(1.000000, 0.316174, 0.000000, 1.000000);
 
 	/** Color associated with Probes subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorProbe = FLinearColor(0.17f, 0.68f, 1.0f, 1.0f);
+	FLinearColor ColorProbe = FLinearColor(0.171875, 0.681472, 1.000000, 1.000000);
 
 	/** Color associated with cluster state (node flags) subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorClusterState = FLinearColor(0.88f, 0.01f, 0.0f, 1.0f);
+	FLinearColor ColorClusterState = FLinearColor(0.885417, 0.012192, 0.000000, 1.000000);
 
 	/** Color associated with pickers subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorPicker = FLinearColor(1.0f, 0.59f, 0.28f, 1.0f);
+	FLinearColor ColorPicker = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with tex params subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorTexParam = FLinearColor(1.0f, 0.20f, 0.18f, 1.0f);
+	FLinearColor ColorTexParam = FLinearColor(1.000000, 0.200000, 0.185865, 1.000000);
 
 	/** Color associated with shapes subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorShape = FLinearColor(1.0f, 0.0f, 0.18f, 1.0f);
+	FLinearColor ColorShape = FLinearColor(1.000000, 0.000000, 0.185865, 1.000000);
 
 	/** Color associated with tensors subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorTensor = FLinearColor(0.35f, 1.0f, 0.47f, 1.0f);
+	FLinearColor ColorTensor = FLinearColor(0.350314, 1.000000, 0.470501, 1.000000);
 
 
 	/** Color associated with sort rules subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorSortRule = FLinearColor(1.0f, 0.59f, 0.28f, 1.0f);
+	FLinearColor ColorSortRule = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with partition rules subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorPartitionRule = FLinearColor(1.0f, 0.59f, 0.28f, 1.0f);
+	FLinearColor ColorPartitionRule = FLinearColor(1.000000, 0.591295, 0.282534, 1.000000);
 
 	/** Color associated with noise subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorNoise3D = FLinearColor(1.0f, 0.191f, 0.0f, 1.0f);
+	FLinearColor ColorNoise3D = FLinearColor(1.000000, 0.191, 0.0, 1.000000);
 
 	/** Color associated with selector subnodes */
 	UPROPERTY(EditAnywhere, config, Category = "Colors and Semantics|Subnodes")
-	FLinearColor ColorSelector = FLinearColor(0.0f, 0.20f, 0.15f, 1.0f);
+	FLinearColor ColorSelector = FLinearColor(0.0, 0.20000, 0.15, 1.000000);
 
 #pragma endregion
 

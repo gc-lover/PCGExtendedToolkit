@@ -210,10 +210,7 @@ namespace PCGExPathSlide
 
 	void FProcessor::OnRangeProcessingComplete()
 	{
-		if (RestorePositionBuffer->InAttribute)
-		{
-			PointDataFacade->Source->DeleteAttribute(RestorePositionBuffer->InAttribute);
-		}
+		PointDataFacade->Source->DeleteAttribute(RestorePositionBuffer->GetTypedInAttribute());
 	}
 }
 

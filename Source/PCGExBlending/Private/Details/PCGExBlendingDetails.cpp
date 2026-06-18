@@ -87,7 +87,7 @@ void FPCGExBlendingDetails::Filter(TArray<PCGExData::FAttributeIdentity>& Identi
 	}
 	for (int i = 0; i < Identities.Num(); i++)
 	{
-		if (!CanBlend(Identities[i].Name))
+		if (!CanBlend(Identities[i].Identifier.Name))
 		{
 			Identities.RemoveAt(i);
 			i--;
@@ -185,13 +185,13 @@ void FPCGExBlendingDetails::GetBlendingParams(const UPCGMetadata* SourceMetadata
 			const PCGExData::FAttributeIdentity& SourceIdentity = *SourceIdentityMap.Find(SourceIdentifier);
 			if (const PCGExData::FAttributeIdentity* TargetIdentityPtr = TargetIdentityMap.Find(SourceIdentifier))
 			{
-				// Type mismatch -- Simply ignore it (Desc-aware: catches Struct<A> vs Struct<B>, TArray<int> vs int, etc.)
-				if (!TargetIdentityPtr->IsSameType(SourceIdentity))
+				// Type mismatch -- Simply ignore it
+				if (TargetIdentityPtr->UnderlyingType != SourceIdentity.UnderlyingType)
 				{
 					Identities.Remove(*TargetIdentityPtr);
 				}
 			}
-			else if (CanBlend(SourceIdentity.Name))
+			else if (CanBlend(SourceIdentity.Identifier.Name))
 			{
 				//Attribute exists on source, but not target.
 				MissingAttribute.Add(Identities.Add(SourceIdentity));
@@ -207,23 +207,22 @@ void FPCGExBlendingDetails::GetBlendingParams(const UPCGMetadata* SourceMetadata
 	{
 		const PCGExData::FAttributeIdentity& Identity = Identities[i];
 
-		if (IgnoreAttributeSet && IgnoreAttributeSet->Contains(Identity.Name))
+		if (IgnoreAttributeSet && IgnoreAttributeSet->Contains(Identity.Identifier.Name))
 		{
 			continue;
 		}
 
 		PCGExBlending::FBlendingParam Param{};
 		Param.bIsNewAttribute = MissingAttribute.Contains(i);
-		const FPCGAttributeIdentifier Identifier = Identity.GetIdentifier();
 
-		if (PCGExMetaHelpers::IsPCGExAttribute(Identity.Name))
+		if (PCGExMetaHelpers::IsPCGExAttribute(Identity.Identifier.Name))
 		{
 			// Don't blend PCGEx stuff
 			Param.SetBlending(EPCGExBlendingType::Copy);
 		}
 		else
 		{
-			if (const EPCGExBlendingType* TypePtr = AttributesOverrides.Find(Identity.Name))
+			if (const EPCGExBlendingType* TypePtr = AttributesOverrides.Find(Identity.Identifier.Name))
 			{
 				Param.SetBlending(*TypePtr);
 			}
@@ -232,7 +231,7 @@ void FPCGExBlendingDetails::GetBlendingParams(const UPCGMetadata* SourceMetadata
 				EPCGExBlendingType DesiredBlending = DefaultBlending;
 
 #define PCGEX_GET_GLOBAL_BLENDMODE(_TYPE, _NAME, ...)\
-if (Identity.ValueType == EPCGMetadataTypes::_NAME){\
+if (Identity.UnderlyingType == EPCGMetadataTypes::_NAME){\
 if (PCGEX_BLENDING_SETTINGS.Default##_NAME##BlendMode != EPCGExBlendingTypeDefault::Default){\
 DesiredBlending = static_cast<EPCGExBlendingType>(PCGEX_BLENDING_SETTINGS.Default##_NAME##BlendMode);}}
 
@@ -249,8 +248,8 @@ DesiredBlending = static_cast<EPCGExBlendingType>(PCGEX_BLENDING_SETTINGS.Defaul
 			continue;
 		}
 
-		OutAttributeIdentifiers.Add(Identifier);
-		Param.Select(Identifier);
+		OutAttributeIdentifiers.Add(Identity.Identifier);
+		Param.Select(Identity.Identifier);
 		OutParams.Add(Param);
 	}
 }

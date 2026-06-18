@@ -718,7 +718,7 @@ bool UPCGExDefaultLevelDataExporter::ExportLevelData(UWorld* World, UPCGDataAsse
 	// pointer traversal (observed as INT_MAX-pointer crashes during level save).
 	{
 		TArray<UObject*> OldInners;
-		GetObjectsWithOuter(OutAsset, OldInners, EGetObjectsFlags::None);
+		GetObjectsWithOuter(OutAsset, OldInners, false);
 		for (UObject* Inner : OldInners)
 		{
 			Inner->Rename(nullptr, GetTransientPackage(),

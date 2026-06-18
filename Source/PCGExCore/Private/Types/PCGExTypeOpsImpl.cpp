@@ -19,7 +19,7 @@ namespace PCGExTypeOps
 		{
 		PCGEX_FOREACH_SUPPORTEDTYPES(PCGEX_TPL)
 		default:
-			return &FCopyOnlyTypeOps::GetInstance();
+			return nullptr;
 		}
 #undef PCGEX_TPL
 	}
@@ -36,24 +36,23 @@ namespace PCGExTypeOps
 
 	namespace
 	{
-		void NoOpConvert(const void* /*Src*/, void* /*Dst*/)
-		{
-		}
-
-		// Helper to populate a row of the conversion table at the correct enum indices
+		// Helper to populate a row of the conversion table
 		template <typename TFrom>
 		void PopulateConversionRow(FConvertFn* Row)
 		{
 			using namespace ConversionFunctions;
-#define PCGEX_TPL(_TYPE, _NAME, ...) Row[static_cast<int32>(EPCGMetadataTypes::_NAME)] = GetConvertFunction<TFrom, _TYPE>();
+
+			int32 Idx = 0;
+#define PCGEX_TPL(_TYPE, _NAME, ...) Row[Idx++] = GetConvertFunction<TFrom, _TYPE>();
 			PCGEX_FOREACH_SUPPORTEDTYPES(PCGEX_TPL)
 #undef PCGEX_TPL
 		}
 	}
 
-	// Populates the 256x256 type conversion dispatch table.
-	// Known types get proper conversion functions at their enum value indices.
-	// All other slots are initialized to NoOpConvert for safe fallback.
+	// Populates the N×N type conversion dispatch table (From × To).
+	// Each row is filled by PopulateConversionRow<TFrom> which instantiates
+	// a ConvertFunction<TFrom, TTo> for every supported target type.
+	// Called once at module load via the static FTypeOpsModuleInit below.
 	void FConversionTable::Initialize()
 	{
 		if (bInitialized)
@@ -61,17 +60,8 @@ namespace PCGExTypeOps
 			return;
 		}
 
-		// Fill entire table with no-op fallback
-		for (int32 i = 0; i < PCGExTypes::TypesAllocations; ++i)
-		{
-			for (int32 j = 0; j < PCGExTypes::TypesAllocations; ++j)
-			{
-				Table[i][j] = &NoOpConvert;
-			}
-		}
-
-		// Populate known type conversions at correct enum indices
-#define PCGEX_TPL(_TYPE, _NAME, ...) PopulateConversionRow<_TYPE>(Table[static_cast<int32>(EPCGMetadataTypes::_NAME)]);
+		int32 Idx = 0;
+#define PCGEX_TPL(_TYPE, _NAME, ...) PopulateConversionRow<_TYPE>(Table[Idx++]);
 		PCGEX_FOREACH_SUPPORTEDTYPES(PCGEX_TPL)
 #undef PCGEX_TPL
 

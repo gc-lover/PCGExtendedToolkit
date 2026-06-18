@@ -32,6 +32,19 @@ namespace PCGExData
 
 namespace PCGExPointIOMerger
 {
+	struct PCGEXBLENDING_API FIdentityRef : PCGExData::FAttributeIdentity
+	{
+		const FPCGMetadataAttributeBase* Attribute = nullptr;
+		FPCGAttributeIdentifier ElementsIdentifier;
+		bool bInitDefault = false;
+		bool bTagOnly = false;
+
+		FIdentityRef();
+		FIdentityRef(const FIdentityRef& Other);
+		FIdentityRef(const FAttributeIdentity& Other);
+		FIdentityRef(const FName InName, const EPCGMetadataTypes InUnderlyingType, const bool InAllowsInterpolation);
+	};
+
 	struct PCGEXBLENDING_API FMergeScope
 	{
 		PCGExMT::FScope Read;
@@ -48,7 +61,7 @@ class PCGEXBLENDING_API FPCGExPointIOMerger final : public TSharedFromThis<FPCGE
 	friend class FPCGExAttributeMergeTask;
 
 public:
-	TArray<PCGExData::FAttributeIdentity> UniqueIdentities;
+	TArray<PCGExPointIOMerger::FIdentityRef> UniqueIdentities;
 	TSharedRef<PCGExData::FFacade> UnionDataFacade;
 	TArray<TSharedPtr<PCGExData::FPointIO>> IOSources;
 	TArray<PCGExPointIOMerger::FMergeScope> Scopes;
@@ -71,11 +84,6 @@ public:
 		return bDataDomainToElements;
 	}
 
-	bool WantsInitDefault() const
-	{
-		return bInitDefault;
-	}
-
 	TSharedPtr<FPCGExIntTracker> InternalTracker;
 	
 protected:
@@ -84,9 +92,6 @@ protected:
 	void CopyProperties(const int32 Index);
 	PCGExPointIOMerger::FMergeScope NullScope;
 	bool bDataDomainToElements = false;
-	// Merger-wide: whether output buffers should be initialized from each attribute's default value
-	// (vs. a zero-init T{}). Sourced from FPCGExCarryOverDetails::bPreserveAttributesDefaultValue.
-	bool bInitDefault = false;
 
 	// Tag keys converted to attributes this merge; stripped from the merged data-domain tags before write.
 	TSet<FName> ConvertedTagNames;
@@ -101,13 +106,13 @@ protected:
 namespace PCGExPointIOMerger
 {
 	template <typename T>
-	static void ScopeMerge(const FMergeScope& Scope, const PCGExData::FAttributeIdentity& Identity, const TSharedPtr<PCGExData::FPointIO>& SourceIO, const TSharedPtr<PCGExData::TBuffer<T>>& OutBuffer)
+	static void ScopeMerge(const FMergeScope& Scope, const FIdentityRef& Identity, const TSharedPtr<PCGExData::FPointIO>& SourceIO, const TSharedPtr<PCGExData::TBuffer<T>>& OutBuffer)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(PCGExPointIOMerger::ScopeMerge);
 
 		UPCGMetadata* InMetadata = SourceIO->GetIn()->Metadata;
 
-		const FPCGMetadataAttributeBase* TypedInAttribute = PCGExMetaHelpers::TryGetConstAttribute<T>(InMetadata, Identity.GetIdentifier());
+		const FPCGMetadataAttribute<T>* TypedInAttribute = PCGExMetaHelpers::TryGetConstAttribute<T>(InMetadata, Identity.Identifier);
 		if (!TypedInAttribute)
 		{
 			return;
@@ -123,7 +128,7 @@ namespace PCGExPointIOMerger
 			if (TypedInAttribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data)
 			{
 				// From a data domain
-				const T Value = PCGExData::Helpers::ReadDataValue<T>(TypedInAttribute);
+				const T Value = PCGExData::Helpers::ReadDataValue(TypedInAttribute);
 				for (int Index = Scope.Write.Start; Index < Scope.Write.End; Index++)
 				{
 					OutElementsBuffer->SetValue(Index, Value);
@@ -134,7 +139,7 @@ namespace PCGExPointIOMerger
 				check(Scope.Read.Count == Scope.Write.Count)
 
 				// From elements domain
-				TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(TypedInAttribute, TypedInAttribute->GetMetadataDomain());
+				TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(TypedInAttribute, InMetadata);
 
 				if (!InAccessor.IsValid())
 				{
@@ -167,12 +172,12 @@ namespace PCGExPointIOMerger
 			if (TypedInAttribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data)
 			{
 				// From data domain
-				OutDataBuffer->SetValue(0, PCGExData::Helpers::ReadDataValue<T>(TypedInAttribute));
+				OutDataBuffer->SetValue(0, PCGExData::Helpers::ReadDataValue(TypedInAttribute));
 			}
 			else
 			{
 				// From elements domain
-				TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(TypedInAttribute, TypedInAttribute->GetMetadataDomain());
+				TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(TypedInAttribute, InMetadata);
 				if (!InAccessor.IsValid())
 				{
 					return;

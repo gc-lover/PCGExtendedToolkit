@@ -142,45 +142,20 @@ namespace PCGExPackClusters
 
 			const PCGExData::FAttributeIdentity& Identity = This->VtxAttributes->Identities[Index];
 
-			PCGExMetaHelpers::ExecuteWithRightType(
-				Identity,
-				[&](auto DummyValue)
+			PCGExMetaHelpers::ExecuteWithRightType(Identity.UnderlyingType, [&](auto DummyValue)
+			{
+				using T = decltype(DummyValue);
+				TArray<T> RawValues;
+
+				TSharedPtr<PCGExData::TBuffer<T>> InValues = This->VtxDataFacade->GetReadable<T>(Identity.Identifier);
+				TSharedPtr<PCGExData::TBuffer<T>> OutValues = This->PackedIOFacade->GetWritable<T>(InValues->GetTypedInAttribute(), PCGExData::EBufferInit::New);
+
+				const TArray<int32>& VtxSelection = This->VtxPointSelection;
+				for (int i = 0; i < VtxSelection.Num(); i++)
 				{
-					using T = decltype(DummyValue);
-					TArray<T> RawValues;
-
-					TSharedPtr<PCGExData::TBuffer<T>> InValues = This->VtxDataFacade->GetReadable<T>(Identity.GetIdentifier());
-					TSharedPtr<PCGExData::TBuffer<T>> OutValues = This->PackedIOFacade->GetWritable<T>(InValues->InAttribute, PCGExData::EBufferInit::New);
-
-					const TArray<int32>& VtxSelection = This->VtxPointSelection;
-					for (int i = 0; i < VtxSelection.Num(); i++)
-					{
-						OutValues->SetValue(This->VtxStartIndex + i, InValues->Read(VtxSelection[i]));
-					}
-				},
-				[&]()
-				{
-					// Property-backed: scatter selected vtx values into packed output via FProperty.
-					if (!Identity.Attribute)
-					{
-						return;
-					}
-
-					TSharedPtr<PCGExData::IBuffer> InBuf = This->VtxDataFacade->GetReadable(Identity, PCGExData::EIOSide::In, false);
-					TSharedPtr<PCGExData::IBuffer> OutBuf = This->PackedIOFacade->GetWritable(Identity.GetType(), Identity.Attribute, PCGExData::EBufferInit::New);
-					if (!InBuf || !OutBuf)
-					{
-						return;
-					}
-
-					PCGExTypes::FScopedTypedValue Scratch = OutBuf->MakeScopedValue();
-					const TArray<int32>& VtxSelection = This->VtxPointSelection;
-					for (int i = 0; i < VtxSelection.Num(); i++)
-					{
-						InBuf->ReadVoid(VtxSelection[i], Scratch);
-						OutBuf->SetVoid(This->VtxStartIndex + i, Scratch);
-					}
-				});
+					OutValues->SetValue(This->VtxStartIndex + i, InValues->Read(VtxSelection[i]));
+				}
+			});
 		};
 
 		CopyVtxAttributes->StartIterations(VtxAttributes->Identities.Num(), 1, false);

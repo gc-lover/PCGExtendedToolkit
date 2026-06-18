@@ -37,9 +37,9 @@ public:
 	virtual void OnMatchFail(int32 Index) override;
 
 protected:
-	TArray<const FPCGMetadataAttributeBase*> SuccessAttributes;
+	TArray<FPCGMetadataAttributeBase*> SuccessAttributes;
 	TArray<TSharedPtr<PCGExData::IBuffer>> SuccessWriters;
-	TArray<const FPCGMetadataAttributeBase*> FailAttributes;
+	TArray<FPCGMetadataAttributeBase*> FailAttributes;
 	TArray<TSharedPtr<PCGExData::IBuffer>> FailWriters;
 };
 

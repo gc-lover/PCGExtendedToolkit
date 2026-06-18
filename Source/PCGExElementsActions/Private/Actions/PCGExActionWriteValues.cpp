@@ -8,7 +8,6 @@
 #include "PCGPin.h"
 #include "Containers/PCGExManagedObjects.h"
 #include "Data/PCGExData.h"
-#include "Data/Buffers/PCGExBufferProperty.h"
 #include "Helpers/PCGExMetaHelpers.h"
 #include "Types/PCGExAttributeIdentity.h"
 
@@ -23,59 +22,28 @@ bool FPCGExActionWriteValuesOperation::PrepareForData(FPCGExContext* InContext, 
 		return false;
 	}
 
-	for (const PCGExData::FAttributeIdentity& Identity : TypedFactory->CheckSuccessInfos->Identities)
+	for (FPCGMetadataAttributeBase* AttributeBase : TypedFactory->CheckSuccessInfos->Attributes)
 	{
-		const FPCGMetadataAttributeBase* AttributeBase = Identity.Attribute;
-		if (!AttributeBase)
+		PCGExMetaHelpers::ExecuteWithRightType(AttributeBase->GetTypeId(), [&](auto DummyValue)
 		{
-			continue;
-		}
-		PCGExMetaHelpers::ExecuteWithRightType(
-			AttributeBase,
-			[&](auto DummyValue)
-			{
-				using T = decltype(DummyValue);
-				TSharedPtr<PCGExData::TBuffer<T>> Writer = InPointDataFacade->GetWritable<T>(AttributeBase, PCGExData::EBufferInit::Inherit);
-				SuccessAttributes.Add(AttributeBase);
-				SuccessWriters.Add(Writer);
-			},
-			[&]()
-			{
-				// Property-backed: route through the generic GetWritableFromAttribute fallback.
-				TSharedPtr<PCGExData::IBuffer> Writer = InPointDataFacade->GetWritableFromAttribute(AttributeBase, PCGExData::EBufferInit::Inherit);
-				if (Writer)
-				{
-					SuccessAttributes.Add(AttributeBase);
-					SuccessWriters.Add(Writer);
-				}
-			});
+			using T = decltype(DummyValue);
+			const FPCGMetadataAttribute<T>* TypedAttribute = static_cast<FPCGMetadataAttribute<T>*>(AttributeBase);
+			TSharedPtr<PCGExData::TBuffer<T>> Writer = InPointDataFacade->GetWritable<T>(TypedAttribute, PCGExData::EBufferInit::Inherit);
+			SuccessAttributes.Add(AttributeBase);
+			SuccessWriters.Add(Writer);
+		});
 	}
 
-	for (const PCGExData::FAttributeIdentity& Identity : TypedFactory->CheckFailInfos->Identities)
+	for (FPCGMetadataAttributeBase* AttributeBase : TypedFactory->CheckFailInfos->Attributes)
 	{
-		const FPCGMetadataAttributeBase* AttributeBase = Identity.Attribute;
-		if (!AttributeBase)
+		PCGExMetaHelpers::ExecuteWithRightType(AttributeBase->GetTypeId(), [&](auto DummyValue)
 		{
-			continue;
-		}
-		PCGExMetaHelpers::ExecuteWithRightType(
-			AttributeBase,
-			[&](auto DummyValue)
-			{
-				using T = decltype(DummyValue);
-				TSharedPtr<PCGExData::TBuffer<T>> Writer = InPointDataFacade->GetWritable<T>(AttributeBase, PCGExData::EBufferInit::Inherit);
-				FailAttributes.Add(AttributeBase);
-				FailWriters.Add(Writer);
-			},
-			[&]()
-			{
-				TSharedPtr<PCGExData::IBuffer> Writer = InPointDataFacade->GetWritableFromAttribute(AttributeBase, PCGExData::EBufferInit::Inherit);
-				if (Writer)
-				{
-					FailAttributes.Add(AttributeBase);
-					FailWriters.Add(Writer);
-				}
-			});
+			using T = decltype(DummyValue);
+			const FPCGMetadataAttribute<T>* TypedAttribute = static_cast<FPCGMetadataAttribute<T>*>(AttributeBase);
+			TSharedPtr<PCGExData::TBuffer<T>> Writer = InPointDataFacade->GetWritable<T>(TypedAttribute, PCGExData::EBufferInit::Inherit);
+			FailAttributes.Add(AttributeBase);
+			FailWriters.Add(Writer);
+		});
 	}
 
 	return true;
@@ -85,26 +53,12 @@ void FPCGExActionWriteValuesOperation::OnMatchSuccess(int32 Index)
 {
 	for (int i = 0; i < SuccessAttributes.Num(); i++)
 	{
-		const FPCGMetadataAttributeBase* AttributeBase = SuccessAttributes[i];
-		PCGExMetaHelpers::ExecuteWithRightType(
-			AttributeBase,
-			[&](auto DummyValue)
-			{
-				using T = decltype(DummyValue);
-				static_cast<PCGExData::TBuffer<T>*>(SuccessWriters[i].Get())->SetValue(Index, AttributeBase->GetValueFromItemKey<T>(PCGDefaultValueKey));
-			},
-			[&]()
-			{
-				// Property-backed: write source attribute's default value into target slot via FProperty.
-				if (SuccessWriters[i] && SuccessWriters[i]->IsPropertyBacked())
-				{
-					const TSharedPtr<PCGExData::FPropertyArrayBuffer> PropBuf = StaticCastSharedPtr<PCGExData::FPropertyArrayBuffer>(SuccessWriters[i]);
-					if (const void* SrcAddr = AttributeBase->GetReadAddressFromEntryKey_Unsafe(PCGDefaultValueKey))
-					{
-						PropBuf->SetFromVoidProperty(Index, SrcAddr);
-					}
-				}
-			});
+		FPCGMetadataAttributeBase* AttributeBase = SuccessAttributes[i];
+		PCGExMetaHelpers::ExecuteWithRightType(AttributeBase->GetTypeId(), [&](auto DummyValue)
+		{
+			using T = decltype(DummyValue);
+			static_cast<PCGExData::TBuffer<T>*>(SuccessWriters[i].Get())->SetValue(Index, static_cast<FPCGMetadataAttribute<T>*>(AttributeBase)->GetValue(PCGDefaultValueKey));
+		});
 	}
 }
 
@@ -112,25 +66,12 @@ void FPCGExActionWriteValuesOperation::OnMatchFail(int32 Index)
 {
 	for (int i = 0; i < FailAttributes.Num(); i++)
 	{
-		const FPCGMetadataAttributeBase* AttributeBase = FailAttributes[i];
-		PCGExMetaHelpers::ExecuteWithRightType(
-			AttributeBase,
-			[&](auto DummyValue)
-			{
-				using T = decltype(DummyValue);
-				static_cast<PCGExData::TBuffer<T>*>(FailWriters[i].Get())->SetValue(Index, AttributeBase->GetValueFromItemKey<T>(PCGDefaultValueKey));
-			},
-			[&]()
-			{
-				if (FailWriters[i] && FailWriters[i]->IsPropertyBacked())
-				{
-					const TSharedPtr<PCGExData::FPropertyArrayBuffer> PropBuf = StaticCastSharedPtr<PCGExData::FPropertyArrayBuffer>(FailWriters[i]);
-					if (const void* SrcAddr = AttributeBase->GetReadAddressFromEntryKey_Unsafe(PCGDefaultValueKey))
-					{
-						PropBuf->SetFromVoidProperty(Index, SrcAddr);
-					}
-				}
-			});
+		FPCGMetadataAttributeBase* AttributeBase = FailAttributes[i];
+		PCGExMetaHelpers::ExecuteWithRightType(AttributeBase->GetTypeId(), [&](auto DummyValue)
+		{
+			using T = decltype(DummyValue);
+			static_cast<PCGExData::TBuffer<T>*>(FailWriters[i].Get())->SetValue(Index, static_cast<FPCGMetadataAttribute<T>*>(AttributeBase)->GetValue(PCGDefaultValueKey));
+		});
 	}
 }
 

@@ -4,9 +4,13 @@
 #include "PCGExElementsTensors.h"
 
 #if WITH_EDITOR
-#include "Core/PCGExTensorFactoryProvider.h"
-#include "Data/Registry/PCGDataTypeRegistry.h"
 #include "Styling/AppStyle.h"
+
+#if PCGEX_ENGINE_VERSION > 506
+#include "Data/Registry/PCGDataTypeRegistry.h" // PCGEX_PCG_DATA_REGISTRY
+#endif
+
+#include "Core/PCGExTensorFactoryProvider.h"
 #endif
 
 #define LOCTEXT_NAMESPACE "FPCGExElementsTensorsModule"

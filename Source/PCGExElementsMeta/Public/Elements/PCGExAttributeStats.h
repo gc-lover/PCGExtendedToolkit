@@ -312,9 +312,9 @@ namespace PCGExAttributeStats
 
 		virtual void Process(const TSharedRef<PCGExData::FFacade> InDataFacade, FPCGExAttributeStatsContext* Context, const UPCGExAttributeStatsSettings* Settings, const TArray<int8>& Filter) override
 		{
-			UPCGParamData* ParamData = Context->OutputParamsMap[Identity.Name];
+			UPCGParamData* ParamData = Context->OutputParamsMap[Identity.Identifier.Name];
 
-			FString StrName = Identity.Name.ToString();
+			FString StrName = Identity.Identifier.Name.ToString();
 			UPCGMetadata* PointsMetadata = nullptr;
 
 			const PCGExTypeOps::ITypeOpsBase* TypeOps = PCGExTypeOps::FTypeOpsRegistry::Get<T>();
@@ -332,7 +332,7 @@ namespace PCGExAttributeStats
 		if (PointsMetadata->GetConstTypedAttribute<_TYPE>(PrintName)) { PointsMetadata->DeleteAttribute(PrintName); }\
 		PointsMetadata->FindOrCreateAttribute<_TYPE>(PrintName, _VALUE);} }
 
-			TSharedPtr<PCGExData::TBuffer<T>> Buffer = InDataFacade->GetReadable<T>(Identity.GetIdentifier());
+			TSharedPtr<PCGExData::TBuffer<T>> Buffer = InDataFacade->GetReadable<T>(Identity.Identifier);
 			SetMinValue = MinValue = Traits::Max();
 			SetMaxValue = MaxValue = Traits::Min();
 
@@ -362,7 +362,7 @@ namespace PCGExAttributeStats
 
 					Context->StageOutput(
 						UniqueValuesParamData, OutputAttributeUniqueValues, PCGExData::EStaging::None,
-						{Identifier, Identity.Name.ToString()});
+						{Identifier, Identity.Identifier.Name.ToString()});
 
 					InDataFacade->Source->Tags->AddRaw(Identifier);
 				}
@@ -373,7 +373,7 @@ namespace PCGExAttributeStats
 				ValuesCount.Reserve(NumPoints);
 				SetValuesCount.Reserve(NumPoints);
 
-				DefaultValue = Buffer->InAttribute->template GetValueFromItemKey<T>(PCGDefaultValueKey);
+				DefaultValue = Buffer->GetTypedInAttribute()->GetValueFromItemKey(PCGDefaultValueKey);
 				int32 NumValues = 0;
 
 				for (int i = 0; i < NumPoints; i++)
@@ -431,7 +431,7 @@ namespace PCGExAttributeStats
 				if (UniqueValuesParamData)
 				{
 					UPCGMetadata* UVM = UniqueValuesParamData->Metadata;
-					FPCGMetadataAttributeBase* UValues = UVM->FindOrCreateAttribute<T>(Settings->UniqueValueAttributeName, MinValue);
+					FPCGMetadataAttribute<T>* UValues = UVM->FindOrCreateAttribute<T>(Settings->UniqueValueAttributeName, MinValue);
 					FPCGMetadataAttribute<int32>* UCount = UVM->FindOrCreateAttribute<int32>(Settings->ValueCountAttributeName, 0);
 
 					if (Settings->bOmitDefaultValue)

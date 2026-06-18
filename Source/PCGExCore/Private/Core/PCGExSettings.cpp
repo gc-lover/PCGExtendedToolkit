@@ -10,7 +10,6 @@
 #include "Core/PCGExContext.h"
 #include "PCGExSettingsCacheBody.h"
 #include "PCGPin.h"
-#include "Core/PCGExContext.h"
 #include "Styling/SlateStyle.h"
 
 #include "Helpers/PCGSettingsHelpers.h"

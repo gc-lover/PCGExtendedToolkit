@@ -26,7 +26,7 @@ namespace PCGExAttributeMapHelpers
 			return 0;
 		}
 
-		TUniquePtr<FPCGAttributeAccessorKeysEntries> Keys = MakeUnique<FPCGAttributeAccessorKeysEntries>(KeyAttr->GetMetadataDomain());
+		TUniquePtr<FPCGAttributeAccessorKeysEntries> Keys = MakeUnique<FPCGAttributeAccessorKeysEntries>(Metadata);
 
 		const int32 NumEntries = Keys->GetNum();
 		if (NumEntries == 0)
@@ -34,13 +34,13 @@ namespace PCGExAttributeMapHelpers
 			return 0;
 		}
 
-		TUniquePtr<const IPCGAttributeAccessor> KeysAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(KeyAttr, KeyAttr->GetMetadataDomain(), true);
+		TUniquePtr<const IPCGAttributeAccessor> KeysAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(KeyAttr, Metadata, true);
 		if (!KeysAccessor)
 		{
 			return 0;
 		}
 
-		TUniquePtr<const IPCGAttributeAccessor> ValuesAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(ValueAttr, ValueAttr->GetMetadataDomain(), true);
+		TUniquePtr<const IPCGAttributeAccessor> ValuesAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(ValueAttr, Metadata, true);
 		if (!ValuesAccessor)
 		{
 			return 0;
@@ -121,17 +121,16 @@ namespace PCGExAttributeMapHelpers
 			}
 
 			TSharedPtr<PCGExData::FAttributesInfos> Infos = PCGExData::FAttributesInfos::Get(ParamData->Metadata);
-			if (!Infos || Infos->Identities.IsEmpty())
+			if (!Infos || Infos->Attributes.IsEmpty())
 			{
 				continue;
 			}
 
-			const FPCGMetadataAttributeBase* KeyCandidate = nullptr;
-			const FPCGMetadataAttributeBase* ValueCandidate = nullptr;
+			FPCGMetadataAttributeBase* KeyCandidate = nullptr;
+			FPCGMetadataAttributeBase* ValueCandidate = nullptr;
 
-			for (const PCGExData::FAttributeIdentity& Identity : Infos->Identities)
+			for (FPCGMetadataAttributeBase* Candidate : Infos->Attributes)
 			{
-				const FPCGMetadataAttributeBase* Candidate = Identity.Attribute;
 				if (!Candidate)
 				{
 					continue;

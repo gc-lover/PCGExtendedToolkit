@@ -56,7 +56,6 @@ public class PCGExPropertiesEditor : ModuleRules
 				"KismetCompiler",
 				"Kismet",
 				"ToolMenus",
-				"StructUtilsEditor", // for OnUserDefinedStructReinstanced delegate (FPCGExProperty_Struct refresh)
 			}
 		);
 

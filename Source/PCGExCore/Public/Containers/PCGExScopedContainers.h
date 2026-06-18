@@ -5,7 +5,6 @@
 
 #include <functional>
 #include "CoreMinimal.h"
-#include "Containers/StaticArray.h"
 #include "Core/PCGExMTCommon.h"
 #include "Misc/ScopeRWLock.h"
 

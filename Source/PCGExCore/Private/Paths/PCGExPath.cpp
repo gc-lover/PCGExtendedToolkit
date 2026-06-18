@@ -10,7 +10,9 @@
 #include "Paths/PCGExPathIntersectionDetails.h"
 #include "Paths/PCGExPathsHelpers.h"
 
+#if PCGEX_ENGINE_VERSION > 506
 #include "Data/PCGPolygon2DData.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "PCGExPaths"
 #define PCGEX_NAMESPACE PCGExPaths

@@ -9,32 +9,22 @@
 #include "Data/Utils/PCGExDataFilterDetails.h"
 #include "Helpers/PCGExMetaHelpers.h"
 #include "Metadata/PCGMetadata.h"
-#include "Metadata/PCGMetadataAttribute.h"
 
 namespace PCGExData
 {
-	FAttributeIdentity::FAttributeIdentity(const FPCGMetadataAttributeBase* InAttribute)
+	bool FAttributeIdentity::InDataDomain() const
 	{
-		if (!InAttribute)
-		{
-			return;
-		}
-
-		// Copy the base desc from the attribute (name, value type, containers, value type object, key type/object).
-		static_cast<FPCGMetadataAttributeDesc&>(*this) = InAttribute->GetAttributeDesc();
-		MetadataDomain = InAttribute->GetMetadataDomain()->GetDomainID();
-		Attribute = InAttribute;
-	}
-
-	FAttributeIdentity::FAttributeIdentity(const FPCGMetadataAttributeDesc& InDesc, const FPCGMetadataDomainID& InDomain)
-		: FPCGMetadataAttributeDesc(InDesc)
-		  , MetadataDomain(InDomain)
-	{
+		return Identifier.MetadataDomain.Flag == EPCGMetadataDomainFlag::Data;
 	}
 
 	FString FAttributeIdentity::GetDisplayName() const
 	{
-		return FString(Name.ToString() + FString::Printf(TEXT("( %d )"), ValueType));
+		return FString(Identifier.Name.ToString() + FString::Printf(TEXT("( %d )"), UnderlyingType));
+	}
+
+	bool FAttributeIdentity::operator==(const FAttributeIdentity& Other) const
+	{
+		return Identifier == Other.Identifier;
 	}
 
 	void FAttributeIdentity::Get(const UPCGMetadata* InMetadata, TArray<FAttributeIdentity>& OutIdentities, const TSet<FName>* OptionalIgnoreList)
@@ -58,7 +48,7 @@ namespace PCGExData
 			{
 				continue;
 			}
-			OutIdentities.AddUnique(FAttributeIdentity(InMetadata->GetConstAttribute(Identifiers[i])));
+			OutIdentities.AddUnique(FAttributeIdentity(Identifiers[i], Types[i], InMetadata->GetConstAttribute(Identifiers[i])->AllowsInterpolation()));
 		}
 	}
 
@@ -82,7 +72,7 @@ namespace PCGExData
 			{
 				continue;
 			}
-			OutIdentities.Add(Identifier, FAttributeIdentity(InMetadata->GetConstAttribute(Identifier)));
+			OutIdentities.Add(Identifier, FAttributeIdentity(Identifier, Types[i], InMetadata->GetConstAttribute(Identifier)->AllowsInterpolation()));
 		}
 	}
 
@@ -94,13 +84,16 @@ namespace PCGExData
 			return false;
 		}
 
-		const FPCGMetadataAttributeBase* SourceAttribute = InData->Metadata->GetConstAttribute(PCGExMetaHelpers::GetAttributeIdentifier(FixedSelector, InData));
-		if (!SourceAttribute)
+		const FPCGMetadataAttributeBase* Attribute = InData->Metadata->GetConstAttribute(PCGExMetaHelpers::GetAttributeIdentifier(FixedSelector, InData));
+		if (!Attribute)
 		{
 			return false;
 		}
 
-		OutIdentity = FAttributeIdentity(SourceAttribute);
+		OutIdentity.Identifier = Attribute->Name;
+		OutIdentity.UnderlyingType = static_cast<EPCGMetadataTypes>(Attribute->GetTypeId());
+		OutIdentity.bAllowsInterpolation = Attribute->AllowsInterpolation();
+
 		return true;
 	}
 
@@ -121,7 +114,7 @@ namespace PCGExData
 
 		for (int i = 0; i < NumAttributes; i++)
 		{
-			const FAttributeIdentity Identity = FAttributeIdentity(InMetadata->GetConstAttribute(Identifiers[i]));
+			const FAttributeIdentity Identity = FAttributeIdentity(Identifiers[i], Types[i], InMetadata->GetConstAttribute(Identifiers[i])->AllowsInterpolation());
 			Func(Identity, i);
 		}
 
@@ -132,7 +125,7 @@ namespace PCGExData
 	{
 		for (FAttributeIdentity& Identity : Identities)
 		{
-			if (Identity.Name == AttributeName && Identity.ValueType == Type)
+			if (Identity.Identifier.Name == AttributeName && Identity.UnderlyingType == Type)
 			{
 				return true;
 			}
@@ -144,7 +137,7 @@ namespace PCGExData
 	{
 		for (FAttributeIdentity& Identity : Identities)
 		{
-			if (Identity.Name == AttributeName)
+			if (Identity.Identifier.Name == AttributeName)
 			{
 				return true;
 			}
@@ -156,7 +149,7 @@ namespace PCGExData
 	{
 		for (FAttributeIdentity& Identity : Identities)
 		{
-			if (Identity.Name == AttributeName)
+			if (Identity.Identifier.Name == AttributeName)
 			{
 				return &Identity;
 			}
@@ -198,27 +191,27 @@ namespace PCGExData
 		{
 			const FAttributeIdentity& OtherId = Other->Identities[i];
 
-			if (!InGatherDetails.Test(OtherId.Name.ToString()))
+			if (!InGatherDetails.Test(OtherId.Identifier.Name.ToString()))
 			{
 				continue;
 			}
 
-			const FPCGAttributeIdentifier OtherIdentifier = OtherId.GetIdentifier();
-			if (const int32* Index = Map.Find(OtherIdentifier))
+			if (const int32* Index = Map.Find(OtherId.Identifier))
 			{
 				const FAttributeIdentity& Id = Identities[*Index];
-				// Desc-aware mismatch: catches Struct<A> vs Struct<B>, TArray<int> vs int, etc.
-				if (!Id.IsSameType(OtherId))
+				if (Id.UnderlyingType != OtherId.UnderlyingType)
 				{
-					OutTypeMismatch.Add(Id.Name);
+					OutTypeMismatch.Add(Id.Identifier.Name);
 					// TODO : Update existing based on settings
 				}
 
 				continue;
 			}
 
+			FPCGMetadataAttributeBase* Attribute = Other->Attributes[i];
 			int32 AppendIndex = Identities.Add(OtherId);
-			Map.Add(OtherIdentifier, AppendIndex);
+			Attributes.Add(Attribute);
+			Map.Add(OtherId.Identifier, AppendIndex);
 		}
 	}
 
@@ -228,26 +221,27 @@ namespace PCGExData
 		{
 			const FAttributeIdentity& OtherId = Other->Identities[i];
 
-			if (InIgnoredAttributes && InIgnoredAttributes->Contains(OtherId.Name))
+			if (InIgnoredAttributes && InIgnoredAttributes->Contains(OtherId.Identifier.Name))
 			{
 				continue;
 			}
 
-			const FPCGAttributeIdentifier OtherIdentifier = OtherId.GetIdentifier();
-			if (const int32* Index = Map.Find(OtherIdentifier))
+			if (const int32* Index = Map.Find(OtherId.Identifier))
 			{
 				const FAttributeIdentity& Id = Identities[*Index];
-				if (!Id.IsSameType(OtherId))
+				if (Id.UnderlyingType != OtherId.UnderlyingType)
 				{
-					OutTypeMismatch.Add(Id.Name);
+					OutTypeMismatch.Add(Id.Identifier.Name);
 					// TODO : Update existing based on settings
 				}
 
 				continue;
 			}
 
+			FPCGMetadataAttributeBase* Attribute = Other->Attributes[i];
 			int32 AppendIndex = Identities.Add(OtherId);
-			Map.Add(OtherIdentifier, AppendIndex);
+			Attributes.Add(Attribute);
+			Map.Add(OtherId.Identifier, AppendIndex);
 		}
 	}
 
@@ -270,15 +264,16 @@ namespace PCGExData
 			FilteredOutNames.Add(Pair.Key.Name);
 		}
 
-		// Filter out identities
+		// Filter out identities & attributes
 		for (FName FilteredOutName : FilteredOutNames)
 		{
 			Map.Remove(FilteredOutName);
 			for (int i = 0; i < Identities.Num(); i++)
 			{
-				if (Identities[i].Name == FilteredOutName)
+				if (Identities[i].Identifier.Name == FilteredOutName)
 				{
 					Identities.RemoveAt(i);
+					Attributes.RemoveAt(i);
 					break;
 				}
 			}
@@ -287,18 +282,21 @@ namespace PCGExData
 		// Refresh indices
 		for (int i = 0; i < Identities.Num(); i++)
 		{
-			Map.Add(Identities[i].GetIdentifier(), i);
+			Map.Add(Identities[i].Identifier, i);
 		}
 	}
 
 	TSharedPtr<FAttributesInfos> FAttributesInfos::Get(const UPCGMetadata* InMetadata, const TSet<FName>* IgnoredAttributes)
 	{
 		PCGEX_MAKE_SHARED(NewInfos, FAttributesInfos)
-		FAttributeIdentity::Get(InMetadata, NewInfos->Identities, IgnoredAttributes);
+		FAttributeIdentity::Get(InMetadata, NewInfos->Identities);
 
+		UPCGMetadata* MutableData = const_cast<UPCGMetadata*>(InMetadata);
 		for (int i = 0; i < NewInfos->Identities.Num(); i++)
 		{
-			NewInfos->Map.Add(NewInfos->Identities[i].GetIdentifier(), i);
+			const FAttributeIdentity& Identity = NewInfos->Identities[i];
+			NewInfos->Map.Add(Identity.Identifier, i);
+			NewInfos->Attributes.Add(MutableData->GetMutableAttribute(Identity.Identifier));
 		}
 
 		return NewInfos;

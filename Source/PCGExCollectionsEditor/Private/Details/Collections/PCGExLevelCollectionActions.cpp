@@ -3,39 +3,51 @@
 
 #include "Details/Collections/PCGExLevelCollectionActions.h"
 
+#include "FileHelpers.h"
+#include "ToolMenuSection.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Collections/PCGExLevelCollection.h"
-#include "Details/Collections/PCGExCollectionEditorHelpers.h"
-#include "Details/Collections/PCGExCollectionEditorTypeRegistry.h"
+#include "Details/Collections/PCGExAssetCollectionEditor.h"
+#include "Details/Collections/PCGExCollectionEditorUtils.h"
 #include "Details/Collections/PCGExLevelCollectionEditor.h"
-#include "Engine/World.h"
-
-PCGEX_REGISTER_COLLECTION_EDITOR_TYPE(
-	Level,
-	UPCGExLevelCollection,
-	UWorld,
-	"SMC_NewLevelCollection",
-	FLinearColor(FColor(255, 156, 0)),
-	"Level Collection",
-	"A weighted collection of level assets.",
-	FPCGExLevelCollectionEditor)
+#include "Misc/MessageDialog.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
+#include "Widgets/Views/SListView.h"
 
 namespace PCGExLevelCollectionActions
 {
 	void CreateCollectionFrom(const TArray<FAssetData>& SelectedAssets)
 	{
-		PCGExCollectionEditorHelpers::CreateCollectionFromTyped(SelectedAssets, UPCGExLevelCollection::StaticClass(), TEXT("SMC_NewLevelCollection"));
+		PCGExCollectionEditorUtils::CreateCollectionFromSelection(
+			UPCGExLevelCollection::StaticClass(),
+			TEXT("SMC_NewLevelCollection"),
+			SelectedAssets);
 	}
 
 	void UpdateCollectionsFrom(
 		const TArray<TObjectPtr<UPCGExLevelCollection>>& SelectedCollections,
-		const TArray<FAssetData>& SelectedAssets)
+		const TArray<FAssetData>& SelectedAssets,
+		bool bIsNewCollection)
 	{
-		TArray<TObjectPtr<UPCGExAssetCollection>> AsBase;
-		AsBase.Reserve(SelectedCollections.Num());
-		for (const TObjectPtr<UPCGExLevelCollection>& C : SelectedCollections)
+		if (SelectedCollections.IsEmpty() || SelectedAssets.IsEmpty())
 		{
-			AsBase.Add(C);
+			return;
 		}
-		PCGExCollectionEditorHelpers::UpdateCollectionsFromTyped(AsBase, SelectedAssets);
+
+		for (const TObjectPtr<UPCGExLevelCollection>& Collection : SelectedCollections)
+		{
+			Collection->EDITOR_AddBrowserSelectionTyped(SelectedAssets);
+		}
 	}
+}
+
+EAssetCommandResult UAssetDefinition_PCGExLevelCollection::OpenAssets(const FAssetOpenArgs& OpenArgs) const
+{
+	for (UPCGExLevelCollection* Collection : OpenArgs.LoadObjects<UPCGExLevelCollection>())
+	{
+		TSharedRef<FPCGExLevelCollectionEditor> Editor = MakeShared<FPCGExLevelCollectionEditor>();
+		Editor->InitEditor(Collection, OpenArgs.GetToolkitMode(), OpenArgs.ToolkitHost);
+	}
+	return EAssetCommandResult::Handled;
 }

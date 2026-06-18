@@ -4,9 +4,13 @@
 #include "PCGExHeuristics.h"
 
 #if WITH_EDITOR
-#include "Core/PCGExHeuristicsFactoryProvider.h"
-#include "Data/Registry/PCGDataTypeRegistry.h"
 #include "Styling/AppStyle.h"
+
+#if PCGEX_ENGINE_VERSION > 506
+#include "Data/Registry/PCGDataTypeRegistry.h" // PCGEX_PCG_DATA_REGISTRY
+#endif
+
+#include "Core/PCGExHeuristicsFactoryProvider.h"
 #endif
 
 #define LOCTEXT_NAMESPACE "FPCGExHeuristicsModule"

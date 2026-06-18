@@ -1,14 +1,17 @@
-// Copyright 2026 Timothé Lapetite and contributors
+﻿// Copyright 2026 Timothé Lapetite and contributors
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "PCGExCollectionsEditorMenuUtils.h"
 
-#include "Core/PCGExAssetCollection.h"
-#include "Details/Collections/PCGExCollectionEditorTypeRegistry.h"
+#include "Collections/PCGExActorCollection.h"
+#include "Collections/PCGExLevelCollection.h"
+#include "Collections/PCGExMeshCollection.h"
+#include "Details/Collections/PCGExActorCollectionActions.h"
+#include "Details/Collections/PCGExLevelCollectionActions.h"
+#include "Details/Collections/PCGExMeshCollectionActions.h"
 #include "Engine/Blueprint.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "Misc/ScopedSlowTask.h"
-#include "UObject/SoftObjectPath.h"
 
 #define LOCTEXT_NAMESPACE "PCGEditorMenuUtils"
 
@@ -22,145 +25,149 @@ namespace PCGExCollectionsEditorMenuUtils
 		{
 			SectionPtr = &(Menu->AddSection(LevelSectionName, LOCTEXT("PCGExSectionLabel", "PCGEx")));
 		}
-		return *SectionPtr;
+
+		FToolMenuSection& Section = *SectionPtr;
+		return Section;
 	}
 
 	void CreateOrUpdatePCGExAssetCollectionsFromMenu(UToolMenu* Menu, TArray<FAssetData>& Assets)
 	{
-		TArray<const FCollectionEditorTypeInfo*> AllInfos;
-		FCollectionEditorTypeRegistry::Get().GetAll(AllInfos);
+		TArray<FAssetData> TempStaticMeshes;
+		TArray<TObjectPtr<UPCGExMeshCollection>> TempMeshCollections;
 
-		TArray<const FCollectionEditorTypeInfo*> MenuInfos;
-		MenuInfos.Reserve(AllInfos.Num());
-		for (const FCollectionEditorTypeInfo* Info : AllInfos)
-		{
-			if (Info && Info->bSupportsMenuCreation && Info->DetectSourceAsset && Info->DetectCollectionAsset)
-			{
-				MenuInfos.Add(Info);
-			}
-		}
+		TArray<FAssetData> TempActorAssets;
+		TArray<TObjectPtr<UPCGExActorCollection>> TempActorCollections;
 
-		if (MenuInfos.IsEmpty())
-		{
-			return;
-		}
-
-		TMap<PCGExAssetCollection::FTypeId, TArray<FAssetData>> SourceAssetsByType;
-		// Defer LoadSynchronous: store soft paths during menu construction; resolve only when
-		// the user actually clicks the menu item. Avoids loading every selected collection asset
-		// just to populate a menu the user may never invoke.
-		TMap<PCGExAssetCollection::FTypeId, TArray<FSoftObjectPath>> CollectionPathsByType;
+		TArray<FAssetData> TempLevelAssets;
+		TArray<TObjectPtr<UPCGExLevelCollection>> TempLevelCollections;
 
 		for (const FAssetData& Asset : Assets)
 		{
-			bool bMatched = false;
-
-			for (const FCollectionEditorTypeInfo* Info : MenuInfos)
+			if (Asset.IsInstanceOf<UStaticMesh>())
 			{
-				if (Info->DetectSourceAsset(Asset))
-				{
-					SourceAssetsByType.FindOrAdd(Info->Id).Add(Asset);
-					bMatched = true;
-					break;
-				}
-			}
-
-			if (bMatched)
-			{
+				TempStaticMeshes.Add(Asset);
 				continue;
 			}
 
-			for (const FCollectionEditorTypeInfo* Info : MenuInfos)
+			if (Asset.IsInstanceOf<UPCGExMeshCollection>())
 			{
-				if (Info->DetectCollectionAsset(Asset))
+				if (UPCGExMeshCollection* Collection = TSoftObjectPtr<UPCGExMeshCollection>(Asset.GetSoftObjectPath()).LoadSynchronous())
 				{
-					CollectionPathsByType.FindOrAdd(Info->Id).Add(Asset.GetSoftObjectPath());
-					break;
+					TempMeshCollections.Add(Collection);
+				}
+
+				continue;
+			}
+
+			if (Asset.AssetClassPath == UWorld::StaticClass()->GetClassPathName())
+			{
+				TempLevelAssets.Add(Asset);
+				continue;
+			}
+
+			if (Asset.IsInstanceOf<UPCGExLevelCollection>())
+			{
+				if (UPCGExLevelCollection* Collection = TSoftObjectPtr<UPCGExLevelCollection>(Asset.GetSoftObjectPath()).LoadSynchronous())
+				{
+					TempLevelCollections.Add(Collection);
+				}
+
+				continue;
+			}
+
+			if (DoesAssetInheritFromAActor(Asset))
+			{
+				TempActorAssets.Add(Asset);
+				continue;
+			}
+
+			if (Asset.IsInstanceOf<UPCGExActorCollection>())
+			{
+				if (UPCGExActorCollection* Collection = TSoftObjectPtr<UPCGExActorCollection>(Asset.GetSoftObjectPath()).LoadSynchronous())
+				{
+					TempActorCollections.Add(Collection);
 				}
 			}
 		}
 
-		if (SourceAssetsByType.IsEmpty())
+		if (TempStaticMeshes.IsEmpty() && TempActorAssets.IsEmpty() && TempLevelAssets.IsEmpty())
 		{
 			return;
 		}
 
 		FToolMenuSection& Section = CreatePCGExSection(Menu);
 
-		FToolUIAction UIAction;
-		UIAction.ExecuteAction.BindLambda(
-			[SourceAssetsByType = MoveTemp(SourceAssetsByType),
-				CollectionPathsByType = MoveTemp(CollectionPathsByType)](const FToolMenuContext& MenuContext)
-			{
-				FScopedSlowTask SlowTask(0.0f, LOCTEXT("CreateOrUpdatePCGExCollection", "Create or Update Asset Collection(s) from selection..."));
-
-				for (const TPair<PCGExAssetCollection::FTypeId, TArray<FAssetData>>& Pair : SourceAssetsByType)
+		if (!TempStaticMeshes.IsEmpty() || !TempActorAssets.IsEmpty() || !TempLevelAssets.IsEmpty())
+		{
+			FToolUIAction UIAction;
+			UIAction.ExecuteAction.BindLambda(
+				[
+					Meshes = MoveTemp(TempStaticMeshes),
+					MeshCollections = MoveTemp(TempMeshCollections),
+					Actors = MoveTemp(TempActorAssets),
+					ActorCollections = MoveTemp(TempActorCollections),
+					Levels = MoveTemp(TempLevelAssets),
+					LevelCollections = MoveTemp(TempLevelCollections)](const FToolMenuContext& MenuContext)
 				{
-					const FCollectionEditorTypeInfo* Info = FCollectionEditorTypeRegistry::Get().Find(Pair.Key);
-					if (!Info)
+					FScopedSlowTask SlowTask(0.0f, LOCTEXT("CreateOrUpdatePCGExMeshCollection", "Create or Update Asset Collection(s) from selection..."));
+
+					if (MeshCollections.IsEmpty())
 					{
-						continue;
+						PCGExMeshCollectionActions::CreateCollectionFrom(Meshes);
+					}
+					else
+					{
+						PCGExMeshCollectionActions::UpdateCollectionsFrom(MeshCollections, Meshes);
 					}
 
-					if (const TArray<FSoftObjectPath>* ExistingPaths = CollectionPathsByType.Find(Pair.Key))
+					if (ActorCollections.IsEmpty())
 					{
-						TArray<TObjectPtr<UPCGExAssetCollection>> Resolved;
-						Resolved.Reserve(ExistingPaths->Num());
-						for (const FSoftObjectPath& Path : *ExistingPaths)
-						{
-							if (UPCGExAssetCollection* Collection = Cast<UPCGExAssetCollection>(TSoftObjectPtr<UObject>(Path).LoadSynchronous()))
-							{
-								Resolved.Add(Collection);
-							}
-						}
-
-						if (Info->UpdateCollections && !Resolved.IsEmpty())
-						{
-							Info->UpdateCollections(Resolved, Pair.Value);
-						}
+						PCGExActorCollectionActions::CreateCollectionFrom(Actors);
 					}
-					else if (Info->CreateCollection)
+					else
 					{
-						Info->CreateCollection(Pair.Value);
+						PCGExActorCollectionActions::UpdateCollectionsFrom(ActorCollections, Actors);
 					}
-				}
-			});
 
-		Section.AddMenuEntry(
-			"CreateOrUpdatePCGExCollectionFromMenu",
-			TAttribute<FText>(FText::FromString(TEXT("Create or Update Asset Collection(s) from selection"))),
-			TAttribute<FText>(FText::FromString(TEXT("If no Asset collection is part of the selection, will create new collections from the selected source assets. If any collection is part of the selection, the matching source assets will be added to it instead."))),
-			FSlateIcon(FName("PCGExStyleSet"), "ClassIcon.PCGExAssetCollection"),
-			UIAction);
+					if (LevelCollections.IsEmpty())
+					{
+						PCGExLevelCollectionActions::CreateCollectionFrom(Levels);
+					}
+					else
+					{
+						PCGExLevelCollectionActions::UpdateCollectionsFrom(LevelCollections, Levels);
+					}
+				});
+
+			Section.AddMenuEntry(
+				"CreateOrUpdatePCGExMeshCollectionFromMenu",
+				TAttribute<FText>(FText::FromString(TEXT("Create or Update Asset Collection(s) from selection"))),
+				TAttribute<FText>(FText::FromString(TEXT("If no Asset collection is part of the selection, will create new Mesh and/or Actor collections. If any collection is part of the selection, the selected mesh and/or actor will be added to the selected collection instead."))),
+				FSlateIcon(FName("PCGExStyleSet"), "ClassIcon.PCGExAssetCollection"),
+				UIAction);
+		}
 	}
 
 	bool DoesAssetInheritFromAActor(const FAssetData& AssetData)
 	{
-		static const FName ParentClassTag = "ParentClass";
+		static const FName ParentClassTag = "ParentClass"; // Used to get parent class
 
+		// Check if the asset is a Blueprint
 		if (AssetData.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName())
 		{
 			FString ParentClassPath;
-			if (!AssetData.GetTagValue(ParentClassTag, ParentClassPath))
+			if (AssetData.GetTagValue(ParentClassTag, ParentClassPath))
 			{
-				return false;
-			}
+				UObject* ParentClassObject = StaticLoadObject(UClass::StaticClass(), nullptr, *ParentClassPath);
+				UClass* ParentClass = Cast<UClass>(ParentClassObject);
 
-			// Try the in-memory class first; only fall back to load if the parent isn't already
-			// resident. AActor and most common BP parents are native and always loaded, so this
-			// avoids forcing a package load during right-click menu construction.
-			UClass* ParentClass = FindObject<UClass>(nullptr, *ParentClassPath);
-			if (!ParentClass)
-			{
-				ParentClass = LoadObject<UClass>(nullptr, *ParentClassPath);
+				return ParentClass && ParentClass->IsChildOf(AActor::StaticClass());
 			}
-			return ParentClass && ParentClass->IsChildOf(AActor::StaticClass());
 		}
-
-		if (AssetData.AssetClassPath == UClass::StaticClass()->GetClassPathName())
+		// Check if the asset is a native class
+		else if (AssetData.AssetClassPath == UClass::StaticClass()->GetClassPathName())
 		{
-			// Native class assets are always loaded -- FindObject suffices.
-			UClass* AssetClass = FindObject<UClass>(nullptr, *AssetData.GetObjectPathString());
+			UClass* AssetClass = Cast<UClass>(AssetData.GetAsset());
 			return AssetClass && AssetClass->IsChildOf(AActor::StaticClass());
 		}
 

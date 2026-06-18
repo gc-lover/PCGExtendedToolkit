@@ -154,7 +154,9 @@ namespace PCGExPathInclusion
 		Skip
 	};
 
+#if PCGEX_ENGINE_VERSION > 506
 	PCGEXFILTERS_API FPCGDataTypeIdentifier GetInclusionIdentifier();
+#endif
 
 	PCGEXFILTERS_API void DeclareInclusionPin(TArray<FPCGPinProperties>& PinProperties);
 

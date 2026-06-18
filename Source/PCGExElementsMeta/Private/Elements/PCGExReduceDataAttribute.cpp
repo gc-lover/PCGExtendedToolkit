@@ -104,14 +104,6 @@ bool FPCGExReduceDataAttributeElement::Boot(FPCGExContext* InContext) const
 			continue;
 		}
 
-		// Reduce semantics (min/max/sum/avg/hash/join) require an arithmetic-capable scalar.
-		// Container/extended types are dropped here so the typed dispatch downstream stays safe.
-		if (!PCGExMetaHelpers::IsBasicSingleValue(Attribute->GetAttributeDesc()))
-		{
-			PCGEX_LOG_UNSUPPORTED_TYPE(Context, ReadIdentifier, FTEXT("Reduce Data Attribute"));
-			continue;
-		}
-
 		int32& Count = TypeCounter.FindOrAdd(Attribute->GetTypeId(), 0);
 		Count++;
 
@@ -182,7 +174,7 @@ bool FPCGExReduceDataAttributeElement::AdvanceWork(FPCGExContext* InContext, con
 			{
 				using T = decltype(DummyValue);
 				const T OutValue = PCGExTypeOps::Convert<int64, T>(AggregatedHash);
-				FPCGMetadataAttributeBase* OutAtt = OutMetadata->FindOrCreateAttribute(Context->WriteIdentifier, OutValue);
+				FPCGMetadataAttribute<T>* OutAtt = OutMetadata->FindOrCreateAttribute(Context->WriteIdentifier, OutValue);
 				OutAtt->SetValue(OutMetadata->AddEntry(), OutValue);
 			});
 		}
@@ -224,7 +216,7 @@ bool FPCGExReduceDataAttributeElement::AdvanceWork(FPCGExContext* InContext, con
 					ReducedValue = PCGExTypeOps::FTypeOps<T>::Div(ReducedValue, Context->Attributes.Num());
 				}
 
-				FPCGMetadataAttributeBase* OutAtt = OutMetadata->FindOrCreateAttribute(Context->WriteIdentifier, ReducedValue);
+				FPCGMetadataAttribute<T>* OutAtt = OutMetadata->FindOrCreateAttribute(Context->WriteIdentifier, ReducedValue);
 				OutAtt->SetValue(OutMetadata->AddEntry(), ReducedValue);
 			});
 		}

@@ -52,6 +52,7 @@ namespace PCGExTypeOps
 	struct FTypeOps<FSoftObjectPath>;
 	template <>
 	struct FTypeOps<FSoftClassPath>;
+
 	// Numeric Type Operations - bool
 
 	template <>
@@ -336,6 +337,16 @@ namespace PCGExTypeOps
 		static FORCEINLINE Type Factor(const Type& A, const double Factor)
 		{
 			return FMath::IsNearlyZero(Factor) ? false : A;
+		}
+
+		static FORCEINLINE double ExtractField(const void* Value, ESingleField Field)
+		{
+			return *static_cast<const Type*>(Value);
+		}
+
+		static FORCEINLINE void InjectField(void* Target, double Value, ESingleField Field)
+		{
+			*static_cast<Type*>(Target) = static_cast<Type>(Value);
 		}
 
 		// Distance / range -- bool treated as 0/1 scalar; suitable for closest-match scoring.
@@ -635,6 +646,16 @@ namespace PCGExTypeOps
 			return A * Factor;
 		}
 
+		static FORCEINLINE double ExtractField(const void* Value, ESingleField Field)
+		{
+			return *static_cast<const Type*>(Value);
+		}
+
+		static FORCEINLINE void InjectField(void* Target, double Value, ESingleField Field)
+		{
+			*static_cast<Type*>(Target) = static_cast<Type>(Value);
+		}
+
 		static FORCEINLINE double Distance(const Type& A, const Type& B)
 		{
 			return FMath::Abs(static_cast<double>(A) - static_cast<double>(B));
@@ -650,7 +671,6 @@ namespace PCGExTypeOps
 			OutMin = FMath::Min(OutMin, InMin);
 			OutMax = FMath::Max(OutMax, InMax);
 		}
-
 	};
 
 	// Numeric Type Operations - int64
@@ -930,6 +950,16 @@ namespace PCGExTypeOps
 		static FORCEINLINE Type Factor(const Type& A, const double Factor)
 		{
 			return A * Factor;
+		}
+
+		static FORCEINLINE double ExtractField(const void* Value, ESingleField Field)
+		{
+			return static_cast<double>(*static_cast<const Type*>(Value));
+		}
+
+		static FORCEINLINE void InjectField(void* Target, double Value, ESingleField Field)
+		{
+			*static_cast<Type*>(Target) = static_cast<Type>(Value);
 		}
 
 		static FORCEINLINE double Distance(const Type& A, const Type& B)
@@ -1228,6 +1258,16 @@ namespace PCGExTypeOps
 			return A * Factor;
 		}
 
+		static FORCEINLINE double ExtractField(const void* Value, ESingleField Field)
+		{
+			return *static_cast<const Type*>(Value);
+		}
+
+		static FORCEINLINE void InjectField(void* Target, double Value, ESingleField Field)
+		{
+			*static_cast<Type*>(Target) = static_cast<Type>(Value);
+		}
+
 		static FORCEINLINE double Distance(const Type& A, const Type& B)
 		{
 			return FMath::Abs(static_cast<double>(A) - static_cast<double>(B));
@@ -1256,7 +1296,6 @@ namespace PCGExTypeOps
 		{
 			return (V - Min) * InvRange;
 		}
-
 	};
 
 	// Numeric Type Operations - double
@@ -1538,6 +1577,16 @@ namespace PCGExTypeOps
 			return A * Factor;
 		}
 
+		static FORCEINLINE double ExtractField(const void* Value, ESingleField Field)
+		{
+			return *static_cast<const Type*>(Value);
+		}
+
+		static FORCEINLINE void InjectField(void* Target, double Value, ESingleField Field)
+		{
+			*static_cast<Type*>(Target) = Value;
+		}
+
 		static FORCEINLINE double Distance(const Type& A, const Type& B)
 		{
 			return FMath::Abs(A - B);
@@ -1565,5 +1614,4 @@ namespace PCGExTypeOps
 			return (V - Min) * InvRange;
 		}
 	};
-
 }

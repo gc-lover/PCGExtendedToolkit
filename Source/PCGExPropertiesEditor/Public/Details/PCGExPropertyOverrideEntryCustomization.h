@@ -10,7 +10,6 @@
 
 class FStructOnScope;
 class IPropertyUtilities;
-class UUserDefinedStruct;
 class SWidget;
 class UPCGExPropertyCollectionComponent;
 
@@ -36,8 +35,6 @@ class FPCGExPropertyOverrideEntryCustomization : public IPropertyTypeCustomizati
 public:
 	static TSharedRef<IPropertyTypeCustomization> MakeInstance();
 
-	virtual ~FPCGExPropertyOverrideEntryCustomization() override;
-
 	virtual void CustomizeHeader(
 		TSharedRef<IPropertyHandle> PropertyHandle,
 		class FDetailWidgetRow& HeaderRow,
@@ -49,8 +46,6 @@ public:
 		IPropertyTypeCustomizationUtils& CustomizationUtils) override;
 
 private:
-	void OnUserDefinedStructReinstanced(const UUserDefinedStruct& Struct);
-
 	const struct FPCGExProperty* AccessEntryProperty() const;
 	FText GetEntryNameText() const;
 	FText GetEntryTypeText() const;
@@ -60,10 +55,6 @@ private:
 	TSharedPtr<IPropertyHandle> EnabledHandlePtr;
 	TSharedPtr<FStructOnScope> InnerScope;
 
-	// Aliases FPCGExProperty_Struct::Value memory; must outlive every row that captures it.
-	TSharedPtr<FStructOnScope> NestedScope;
-
-	FDelegateHandle UserDefinedStructReinstancedHandle;
 	// Captured at CustomizeHeader -- inline-path external-structure rows return nothing from
 	// Handle->GetOuterObjects, so the reset delegates can't re-derive the component. Null when
 	// the entry isn't owned by a UPCGExPropertyCollectionComponent or is Instance-created (no

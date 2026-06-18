@@ -31,7 +31,11 @@ TArray<FPCGPinProperties> UPCGExFactoryProviderSettings::OutputPinProperties() c
 	TArray<FPCGPinProperties> PinProperties;
 
 	{
+#if PCGEX_ENGINE_VERSION > 506
 		FPCGPinProperties& Pin = PinProperties.Emplace_GetRef(GetMainOutputPin(), GetFactoryTypeId(), false, false);
+#else
+		FPCGPinProperties& Pin = PinProperties.Emplace_GetRef(GetMainOutputPin(), EPCGDataType::Param, false, false);
+#endif
 		PCGEX_PIN_TOOLTIP(GetMainOutputPin().ToString())
 		PCGEX_PIN_STATUS(Required)
 	}
@@ -123,10 +127,12 @@ void FPCGExFactoryProviderElement::DisabledPassThroughData(FPCGContext* Context)
 	Context->OutputData.TaggedData.Empty();
 }
 
+#if PCGEX_ENGINE_VERSION > 506
 const FPCGDataTypeBaseId& UPCGExFactoryProviderSettings::GetFactoryTypeId() const
 {
 	return FPCGExFactoryDataTypeInfo::AsId();
 }
+#endif
 
 #undef LOCTEXT_NAMESPACE
 #undef PCGEX_NAMESPACE

@@ -7,8 +7,6 @@
 #include "Data/PCGExPointElements.h"
 #include "Data/PCGExPointIO.h"
 #include "Data/PCGPointArrayData.h"
-#include "Helpers/PCGExMetaHelpers.h"
-#include "Metadata/PCGMetadataAttribute.h"
 
 namespace PCGExData
 {
@@ -31,9 +29,31 @@ namespace PCGExData
 
 	bool FProxyDescriptor::Capture(FPCGExContext* InContext, const FString& Path, const EIOSide InSide, const bool bRequired)
 	{
-		FPCGAttributePropertyInputSelector NewSelector;
-		NewSelector.Update(Path);
-		return Capture(InContext, NewSelector, InSide, bRequired);
+		const TSharedPtr<FFacade> InFacade = DataFacade.Pin();
+		check(InFacade);
+
+		bool bValid = true;
+
+		Selector = FPCGAttributePropertyInputSelector();
+		Selector.Update(Path);
+
+		Side = InSide;
+
+		if (!TryGetTypeAndSource(Selector, InFacade, RealType, Side))
+		{
+			if (bRequired)
+			{
+				PCGEX_LOG_INVALID_SELECTOR_C(InContext, , Selector)
+			}
+			bValid = false;
+		}
+
+		Selector = Selector.CopyAndFixLast(InFacade->Source->GetData(Side));
+
+		UpdateSubSelection();
+		WorkingType = SubSelection.GetSubType(RealType);
+
+		return bValid;
 	}
 
 	bool FProxyDescriptor::Capture(FPCGExContext* InContext, const FPCGAttributePropertyInputSelector& InSelector, const EIOSide InSide, const bool bRequired)
@@ -58,22 +78,6 @@ namespace PCGExData
 
 		UpdateSubSelection();
 		WorkingType = SubSelection.GetSubType(RealType);
-
-		// Cache the source attribute's Desc. Reset to default first so SourceDesc.IsValid()
-		// returns false when the selector isn't an attribute (point property, extra property).
-		SourceDesc = FPCGMetadataAttributeDesc{};
-		if (Selector.GetSelection() == EPCGAttributePropertySelection::Attribute)
-		{
-			if (const UPCGData* InData = InFacade->Source->GetData(Side);
-				InData && InData->Metadata)
-			{
-				if (const FPCGMetadataAttributeBase* Attr = InData->Metadata->GetConstAttribute(
-					PCGExMetaHelpers::GetAttributeIdentifier(Selector, InData)))
-				{
-					SourceDesc = Attr->GetAttributeDesc();
-				}
-			}
-		}
 
 		return bValid;
 	}
@@ -199,13 +203,12 @@ namespace PCGExData
 		return RealType == InDescriptor.RealType && WorkingType == InDescriptor.WorkingType;
 	}
 
-	void IBufferProxy::SetSubSelection(const FSubSelection& InSubSelection,
-	                                   const FPCGMetadataAttributeDesc* SourceDesc)
+	void IBufferProxy::SetSubSelection(const FSubSelection& InSubSelection)
 	{
-		bWantsSubSelection = InSubSelection.HasSelection();
+		bWantsSubSelection = InSubSelection.bIsValid;
 		if (bWantsSubSelection)
 		{
-			CachedSubSelection.Initialize(InSubSelection, RealType, WorkingType, SourceDesc);
+			CachedSubSelection.Initialize(InSubSelection, RealType, WorkingType);
 		}
 	}
 
@@ -233,24 +236,6 @@ namespace PCGExData
 	PCGEX_FOREACH_SUPPORTEDTYPES(PCGEX_CONVERTING_READ_IMPL)
 
 #undef PCGEX_CONVERTING_READ_IMPL
-
-	int32 IBufferProxy::GetValueSize() const
-	{
-		if (WorkingOps)
-		{
-			return WorkingOps->GetTypeSize();
-		}
-		return PCGExTypes::FScopedTypedValue::GetTypeSize(WorkingType);
-	}
-
-	int32 IBufferProxy::GetValueAlignment() const
-	{
-		if (WorkingOps)
-		{
-			return WorkingOps->GetTypeAlignment();
-		}
-		return 1;
-	}
 
 #pragma endregion
 

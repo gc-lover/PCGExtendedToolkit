@@ -5,14 +5,12 @@
 #include "Elements/PCGExAttributeRemap.h"
 
 #include "PCGExVersion.h"
-#include "PCGExVersion.h"
-#include "Containers/PCGExScopedContainers.h"
 #include "Containers/PCGExScopedContainers.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExPointIO.h"
 #include "Data/PCGExProxyData.h"
 #include "Data/PCGExProxyDataHelpers.h"
-#include "Data/PCGExSubAccessor.h"
+#include "Data/PCGExSubSelectionOps.h"
 #include "Details/PCGExSettingsDetails.h"
 
 
@@ -174,24 +172,9 @@ namespace PCGExAttributeRemap
 			return false;
 		}
 
-		// Attribute Remap is a per-field numeric operation (clamp + remap arithmetic).
-		// It has no meaning on extended-type scalars (Struct, Object, Class, Soft*,
-		// Byte, Text, Enum) or container attributes (TArray/TSet/TMap). Reject those
-		// here -- previously this was caught (incidentally) by TryGetType returning
-		// Unknown and failing Capture; that's no longer true, so the guard is now
-		// explicit.
-		{
-			const bool bIsContainer = InputDescriptor.SourceDesc.IsValid() && !InputDescriptor.SourceDesc.IsSingleValue();
-			if (bIsContainer || !PCGExMetaHelpers::IsLegacyScalarType(InputDescriptor.RealType))
-			{
-				PCGE_LOG_C(Error, GraphAndLog, Context, FTEXT("Attribute Remap requires a numeric scalar attribute. Struct, Object, container, and other extended types are not supported."));
-				return false;
-			}
-		}
-
 		// Number of dimensions to be remapped
 		UnderlyingType = InputDescriptor.WorkingType;
-		Dimensions = FMath::Min(4, PCGExData::GetNumFieldsForType(UnderlyingType));
+		Dimensions = FMath::Min(4, PCGExData::FSubSelectorRegistry::Get(UnderlyingType)->GetNumFields());
 
 		// Get per-field proxies for input
 		if (!GetPerFieldProxyBuffers(Context, InputDescriptor, Dimensions, UntypedInputProxies))
@@ -203,7 +186,7 @@ namespace PCGExAttributeRemap
 		{
 			// This might be expected if the destination does not exist
 
-			if (Dimensions == 1 && Settings->Attributes.WantsRemappedOutput() && !OutputDescriptor.SubSelection.HasSelection())
+			if (Dimensions == 1 && Settings->Attributes.WantsRemappedOutput() && !OutputDescriptor.SubSelection.bIsValid)
 			{
 				// We're remapping a component to a single value with no subselection
 				OutputDescriptor.RealType = InputDescriptor.WorkingType;

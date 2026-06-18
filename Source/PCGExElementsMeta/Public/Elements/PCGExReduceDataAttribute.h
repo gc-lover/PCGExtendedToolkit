@@ -118,12 +118,12 @@ protected:
 		for (int i = 0; i < InAttributes.Num(); i++)
 		{
 			const FPCGMetadataAttributeBase* Att = InAttributes[i];
-			// Container/extended types are filtered upstream during attribute gathering -- single-callback
-			// overload here just keeps the contract explicit (no-op if it slips through somehow).
-			PCGExMetaHelpers::ExecuteWithRightType(Att, [&](auto ValueType)
+			PCGExMetaHelpers::ExecuteWithRightType(Att->GetTypeId(), [&](auto ValueType)
 			{
 				using T_ATTR = decltype(ValueType);
-				Func(PCGExTypeOps::Convert<T_ATTR, T>(PCGExData::Helpers::ReadDataValue<T_ATTR>(Att)), i);
+				const FPCGMetadataAttribute<T_ATTR>* TypedAtt = static_cast<const FPCGMetadataAttribute<T_ATTR>*>(Att);
+				T_ATTR Value = PCGExData::Helpers::ReadDataValue(TypedAtt);
+				Func(PCGExTypeOps::Convert<T_ATTR, T>(Value), i);
 			});
 		}
 	}

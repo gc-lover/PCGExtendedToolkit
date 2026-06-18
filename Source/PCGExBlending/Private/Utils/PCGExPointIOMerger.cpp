@@ -5,11 +5,9 @@
 #include "Utils/PCGExPointIOMerger.h"
 
 #include "PCGExCommon.h"
-#include "Data/PCGExDataHelpers.h"
 #include "Data/PCGExDataTags.h"
 #include "Data/PCGExDataValue.h"
 #include "Data/Utils/PCGExDataFilterDetails.h"
-#include "Data/Buffers/PCGExBufferProperty.h"
 #include "Details/PCGExBlendingDetails.h"
 #include "Types/PCGExTypeTraits.h"
 #include "Utils/PCGExIntTracker.h"
@@ -25,7 +23,7 @@ namespace PCGExPointIOMerger
 		FWriteAttributeScopeTask(
 			const TSharedPtr<PCGExData::FPointIO>& InPointIO,
 			const FMergeScope& InScope,
-			const PCGExData::FAttributeIdentity& InIdentity,
+			const FIdentityRef& InIdentity,
 			const TSharedPtr<PCGExData::TBuffer<T>>& InOutBuffer,
 			const TSharedPtr<FPCGExIntTracker>& InTracker)
 			: FTask()
@@ -39,7 +37,7 @@ namespace PCGExPointIOMerger
 
 		const TSharedPtr<PCGExData::FPointIO> PointIO;
 		const FMergeScope Scope;
-		const PCGExData::FAttributeIdentity Identity;
+		const FIdentityRef Identity;
 		const TSharedPtr<PCGExData::TBuffer<T>> OutBuffer;
 		TSharedPtr<FPCGExIntTracker> Tracker;
 
@@ -55,43 +53,6 @@ namespace PCGExPointIOMerger
 	PCGEX_FOREACH_SUPPORTEDTYPES(PCGEX_TPL)
 
 #undef PCGEX_TPL
-
-	// Property-backed counterpart to FWriteAttributeScopeTask<T>. Used for extended/container-typed
-	// attributes that aren't covered by PCGEX_FOREACH_SUPPORTEDTYPES. Not templated -- relies on
-	// PropertyCopyAttributeRange to do property-aware deep copy via the target buffer's CachedInnerProperty.
-	class FWriteAttributePropertyScopeTask final : public PCGExMT::FTask
-	{
-	public:
-		PCGEX_ASYNC_TASK_NAME(FWriteAttributePropertyScopeTask)
-
-		FWriteAttributePropertyScopeTask(
-			const TSharedPtr<PCGExData::FPointIO>& InPointIO,
-			const FMergeScope& InScope,
-			const PCGExData::FAttributeIdentity& InIdentity,
-			const TSharedRef<PCGExData::FPropertyArrayBuffer>& InOutBuffer,
-			const TSharedPtr<FPCGExIntTracker>& InTracker)
-			: FTask()
-			  , PointIO(InPointIO)
-			  , Scope(InScope)
-			  , Identity(InIdentity)
-			  , OutBuffer(InOutBuffer)
-			  , Tracker(InTracker)
-		{
-		}
-
-		const TSharedPtr<PCGExData::FPointIO> PointIO;
-		const FMergeScope Scope;
-		const PCGExData::FAttributeIdentity Identity;
-		const TSharedRef<PCGExData::FPropertyArrayBuffer> OutBuffer;
-		TSharedPtr<FPCGExIntTracker> Tracker;
-
-		virtual void ExecuteTask(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager) override
-		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(FWriteAttributePropertyScopeTask::ExecuteTask);
-			PCGExData::Helpers::PropertyCopyAttributeRange(PointIO, Identity, OutBuffer, Scope.Read, Scope.Write, Scope.bReverse);
-			Tracker->IncrementCompleted();
-		}
-	};
 
 	// Tag fallback for FCopyAttributeTask: broadcasts one source's resolved tag value across its disjoint output range.
 	template <typename T>
@@ -147,124 +108,92 @@ namespace PCGExPointIOMerger
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(FCopyAttributeTask::ExecuteTask);
 
-			const PCGExData::FAttributeIdentity& Identity = Merger->UniqueIdentities[TaskIndex];
-			const FPCGAttributeIdentifier Identifier = Identity.GetIdentifier();
-			// Merger routes data-domain attributes into Elements when WantsDataToElements() -- compute that here.
-			const FPCGAttributeIdentifier TargetIdentifier = Merger->WantsDataToElements()
-				? FPCGAttributeIdentifier(Identity.Name, PCGMetadataDomainID::Elements)
-				: Identifier;
-			const bool bInitDefault = Merger->WantsInitDefault();
-			const bool bAllowsInterp = Identity.GetAllowsInterpolation();
+			const FIdentityRef& Identity = Merger->UniqueIdentities[TaskIndex];
 
 			// Tag-only synthetic identities never consult source metadata, so a filtered-out same-named real attribute is ignored.
 			const bool bTagOnly = Identity.bTagOnly;
-			const TArray<TSharedPtr<PCGExData::IDataValue>>* TagValues = Merger->TagValuesByName.Find(Identity.Name);
+			const TArray<TSharedPtr<PCGExData::IDataValue>>* TagValues = Merger->TagValuesByName.Find(Identity.Identifier.Name);
 
-			PCGExMetaHelpers::ExecuteWithRightType(
-				Identity,
-				[&](auto DummyValue)
+			PCGExMetaHelpers::ExecuteWithRightType(Identity.UnderlyingType, [&](auto DummyValue)
+			{
+				using T = decltype(DummyValue);
+
+				TSharedPtr<PCGExData::TBuffer<T>> Buffer = Merger->UnionDataFacade->GetWritable(
+					Merger->WantsDataToElements() ? Identity.ElementsIdentifier : Identity.Identifier,
+					Identity.bInitDefault ? static_cast<const FPCGMetadataAttribute<T>*>(Identity.Attribute)->GetValue(PCGDefaultValueKey) : T{},
+					Identity.bAllowsInterpolation, PCGExData::EBufferInit::New);
+
+				if (!Buffer)
 				{
-					// Typed path -- basic legacy types covered by PCGEX_FOREACH_SUPPORTEDTYPES.
-					using T = decltype(DummyValue);
+					return;
+				}
 
-					TSharedPtr<PCGExData::TBuffer<T>> Buffer = Merger->UnionDataFacade->GetWritable(
-						TargetIdentifier,
-						bInitDefault && Identity.Attribute
-						? Identity.Attribute->GetValueFromItemKey<T>(PCGDefaultValueKey)
-						: T{},
-						bAllowsInterp, PCGExData::EBufferInit::New);
-
-					for (int i = 0; i < Merger->IOSources.Num(); i++)
-					{
-						const TSharedPtr<PCGExData::FPointIO>& SourceIO = Merger->IOSources[i];
-
-						// A real attribute on this source wins (its type must match the resolved type).
-						if (!bTagOnly)
-						{
-							const FPCGMetadataAttributeBase* Attribute = SourceIO->GetIn()->Metadata->GetConstAttribute(Identifier);
-							if (Attribute && Attribute->IsOfType<T>())
-							{
-								Merger->InternalTracker->IncrementPending();
-								PCGEX_LAUNCH_INTERNAL(FWriteAttributeScopeTask<T>, SourceIO, Merger->Scopes[i], Identity, Buffer, Merger->InternalTracker)
-								continue;
-							}
-							// No usable attribute on this source -> fall through to its tag value, if any.
-						}
-
-						if (!TagValues)
-						{
-							continue;
-						}
-
-						const TSharedPtr<PCGExData::IDataValue>& TagValue = (*TagValues)[i];
-						if (!TagValue)
-						{
-							continue;
-						} // This source doesn't carry the tag.
-
-						const FMergeScope& Scope = Merger->Scopes[i];
-						if (Scope.Write.Count <= 0)
-						{
-							continue;
-						}
-
-						// No type gate -- always convert: GetValue<T> takes a same-type tag verbatim (preserving
-						// e.g. int64 precision) and otherwise applies PCGExTypeOps' best-effort conversion.
-						const T ConvertedValue = TagValue->GetValue<T>();
-
-						Merger->InternalTracker->IncrementPending();
-						PCGEX_LAUNCH_INTERNAL(FWriteConvertedTagScopeTask<T>, Scope, ConvertedValue, Buffer, Merger->InternalTracker)
-					}
-
-					Merger->InternalTracker->IncrementCompleted();
-				},
-				[&]()
+				for (int i = 0; i < Merger->IOSources.Num(); i++)
 				{
-					// Property-backed path -- Struct/Enum/Object/SoftObject/Class/SoftClass/Byte/Text + containers.
-					// The facade's generic GetWritable routes unknown types to FPropertyArrayBuffer, which
-					// builds CachedInnerProperty from the source attribute's desc (handles container wrapping).
-					if (!Identity.Attribute)
-					{
-						PCGE_LOG_C(Warning, GraphAndLog, TaskManager->GetContext(), FText::Format(
-							           FTEXT("Cannot merge attribute '{0}' -- no source attribute resolved on identity (extended/container type with null Attribute pointer)."),
-							           FText::FromName(Identity.Name)));
-						return;
-					}
+					const TSharedPtr<PCGExData::FPointIO>& SourceIO = Merger->IOSources[i];
 
-					const TSharedPtr<PCGExData::IBuffer> RawBuffer = Merger->UnionDataFacade->GetWritable(
-						Identity.GetType(), Identity.Attribute, PCGExData::EBufferInit::New);
-					if (!RawBuffer || !RawBuffer->IsPropertyBacked())
+					// A real attribute on this source wins (its type must match the resolved type).
+					if (!bTagOnly)
 					{
-						PCGE_LOG_C(Warning, GraphAndLog, TaskManager->GetContext(), FText::Format(
-							           FTEXT("Cannot merge attribute '{0}' -- failed to create property-backed writable buffer."),
-							           FText::FromName(Identity.Name)));
-						return;
-					}
-
-					const TSharedPtr<PCGExData::FPropertyArrayBuffer> PropBuffer = StaticCastSharedPtr<PCGExData::FPropertyArrayBuffer>(RawBuffer);
-					const TSharedRef<PCGExData::FPropertyArrayBuffer> PropBufferRef = PropBuffer.ToSharedRef();
-					for (int i = 0; i < Merger->IOSources.Num(); i++)
-					{
-						TSharedPtr<PCGExData::FPointIO> SourceIO = Merger->IOSources[i];
-						const FPCGMetadataAttributeBase* Attribute = SourceIO->GetIn()->Metadata->GetConstAttribute(Identifier);
-						if (!Attribute)
+						const FPCGMetadataAttributeBase* Attribute = SourceIO->GetIn()->Metadata->GetConstAttribute(Identity.Identifier);
+						if (Attribute && Identity.IsA(Attribute->GetTypeId()))
 						{
+							Merger->InternalTracker->IncrementPending();
+							PCGEX_LAUNCH_INTERNAL(FWriteAttributeScopeTask<T>, SourceIO, Merger->Scopes[i], Identity, Buffer, Merger->InternalTracker)
 							continue;
 						}
-						// Desc-aware mismatch -- same gate the typed path applies via IsOfType<T>.
-						if (!Attribute->GetAttributeDesc().IsSameType(Identity.Attribute->GetAttributeDesc()))
-						{
-							continue;
-						}
-
-						Merger->InternalTracker->IncrementPending();
-						PCGEX_LAUNCH_INTERNAL(FWriteAttributePropertyScopeTask, SourceIO, Merger->Scopes[i], Identity, PropBufferRef, Merger->InternalTracker)
+						// No usable attribute on this source -> fall through to its tag value, if any.
 					}
-				});
+
+					if (!TagValues)
+					{
+						continue;
+					}
+
+					const TSharedPtr<PCGExData::IDataValue>& TagValue = (*TagValues)[i];
+					if (!TagValue)
+					{
+						continue;
+					} // This source doesn't carry the tag.
+
+					const FMergeScope& Scope = Merger->Scopes[i];
+					if (Scope.Write.Count <= 0)
+					{
+						continue;
+					}
+
+					// No type gate -- always convert: GetValue<T> takes a same-type tag verbatim (preserving
+					// e.g. int64 precision) and otherwise applies PCGExTypeOps' best-effort conversion.
+					const T ConvertedValue = TagValue->GetValue<T>();
+
+					Merger->InternalTracker->IncrementPending();
+					PCGEX_LAUNCH_INTERNAL(FWriteConvertedTagScopeTask<T>, Scope, ConvertedValue, Buffer, Merger->InternalTracker)
+				}
+			});
 
 			Merger->InternalTracker->IncrementCompleted();
 		}
 	};
+}
+
+PCGExPointIOMerger::FIdentityRef::FIdentityRef()
+	: FAttributeIdentity()
+{
+}
+
+PCGExPointIOMerger::FIdentityRef::FIdentityRef(const FIdentityRef& Other)
+	: FAttributeIdentity(Other)
+{
+}
+
+PCGExPointIOMerger::FIdentityRef::FIdentityRef(const FAttributeIdentity& Other)
+	: FAttributeIdentity(Other)
+{
+}
+
+PCGExPointIOMerger::FIdentityRef::FIdentityRef(const FName InName, const EPCGMetadataTypes InUnderlyingType, const bool InAllowsInterpolation)
+	: FAttributeIdentity(InName, InUnderlyingType, InAllowsInterpolation)
+{
 }
 
 FPCGExPointIOMerger::FPCGExPointIOMerger(const TSharedRef<PCGExData::FFacade>& InUnionDataFacade)
@@ -343,7 +272,6 @@ void FPCGExPointIOMerger::MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& Ta
 
 	bWriteFacade = bWriteUnion;
 	bDataDomainToElements = InCarryOverDetails->bDataDomainToElements;
-	bInitDefault = InCarryOverDetails->bPreserveAttributesDefaultValue;
 
 	InCarryOverDetails->Prune(&UnionDataFacade->Source.Get());
 	TMap<FPCGAttributeIdentifier, int32> ExpectedTypes;
@@ -371,35 +299,43 @@ void FPCGExPointIOMerger::MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& Ta
 
 		// Discover attributes
 		UPCGMetadata* Metadata = Source->GetIn()->Metadata;
-		PCGExData::FAttributeIdentity::ForEach(Metadata, [&](const PCGExData::FAttributeIdentity& SourceIdentity, const int32)
-		{
-			if (InIgnoredAttributes && InIgnoredAttributes->Contains(SourceIdentity.Name))
+		PCGExData::FAttributeIdentity::ForEach(
+			Metadata,
+			[&](const PCGExData::FAttributeIdentity& SourceIdentity, const int32)
 			{
-				return;
-			}
+				if (InIgnoredAttributes && InIgnoredAttributes->Contains(SourceIdentity.Identifier.Name))
+				{
+					return;
+				}
 
-			FString StrName = SourceIdentity.Name.ToString();
-			if (!InCarryOverDetails->Attributes.Test(StrName))
-			{
-				return;
-			}
+				FString StrName = SourceIdentity.Identifier.Name.ToString();
+				if (!InCarryOverDetails->Attributes.Test(StrName))
+				{
+					return;
+				}
 
-			const FPCGAttributeIdentifier SourceIdentifier = SourceIdentity.GetIdentifier();
-			const int32* ExpectedType = ExpectedTypes.Find(SourceIdentifier);
-			if (!ExpectedType)
-			{
-				// No type expectations, we need to register a new identity (Attribute is already cached on it).
-				UniqueIdentities.Emplace(SourceIdentity);
-				ExpectedTypes.Add(SourceIdentifier, UniqueIdentities.Num() - 1);
-				return;
-			}
+				const int32* ExpectedType = ExpectedTypes.Find(SourceIdentity.Identifier);
+				if (!ExpectedType)
+				{
+					// No type expectations, we need to register a new attribute ref
+					PCGExPointIOMerger::FIdentityRef& SourceRef = UniqueIdentities.Emplace_GetRef(SourceIdentity);
+					SourceRef.Attribute = Metadata->GetConstAttribute(SourceIdentity.Identifier);
+					SourceRef.bInitDefault = InCarryOverDetails->bPreserveAttributesDefaultValue;
 
-			// Desc-aware mismatch: catches Struct<A> vs Struct<B>, TArray<int> vs int, etc.
-			if (!UniqueIdentities[*ExpectedType].IsSameType(SourceIdentity))
-			{
-				PCGE_LOG_C(Warning, GraphAndLog, TaskManager->GetContext(), FText::Format(FTEXT("Mismatching attribute types for: {0}."), FText::FromName(SourceIdentity.Name)));
-			}
-		});
+					SourceRef.ElementsIdentifier.Name = SourceIdentity.Identifier.Name;
+					SourceRef.ElementsIdentifier.MetadataDomain = PCGMetadataDomainID::Elements;
+
+					ExpectedTypes.Add(SourceRef.Identifier, UniqueIdentities.Num() - 1);
+
+					return;
+				}
+
+				// Notify type/name mismatch if needed
+				if (UniqueIdentities[*ExpectedType].UnderlyingType != SourceIdentity.UnderlyingType)
+				{
+					PCGE_LOG_C(Warning, GraphAndLog, TaskManager->GetContext(), FText::Format(FTEXT("Mismatching attribute types for: {0}."), FText::FromName(SourceIdentity.Identifier.Name)));
+				}
+			});
 	}
 
 	// Tag-to-attribute plan (opt-in), built once carried attributes are known. A tag passing the filter is
@@ -410,9 +346,9 @@ void FPCGExPointIOMerger::MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& Ta
 		// Names already owned by a carried real attribute (composite targets).
 		TSet<FName> CarriedNames;
 		CarriedNames.Reserve(UniqueIdentities.Num());
-		for (const PCGExData::FAttributeIdentity& Identity : UniqueIdentities)
+		for (const PCGExPointIOMerger::FIdentityRef& Identity : UniqueIdentities)
 		{
-			CarriedNames.Add(Identity.Name);
+			CarriedNames.Add(Identity.Identifier.Name);
 		}
 
 		// Resolved output type for tag-only names (first typed value wins; presence-only stays Boolean).
@@ -476,14 +412,12 @@ void FPCGExPointIOMerger::MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& Ta
 				EntryType = EPCGMetadataTypes::Integer64;
 			}
 
-			FPCGMetadataAttributeDesc TagDesc;
-			TagDesc.Name = Pair.Key;
-			TagDesc.ValueType = EntryType;
-
-			// Synthetic identity: no backing metadata attribute, fed purely from tags. Lives in the Elements
-			// domain; Attribute stays null (GetAllowsInterpolation() then defaults to true).
-			PCGExData::FAttributeIdentity& Entry = UniqueIdentities.Emplace_GetRef(TagDesc, PCGMetadataDomainID::Elements);
-			Entry.bTagOnly = true;
+			PCGExPointIOMerger::FIdentityRef& Entry = UniqueIdentities.Emplace_GetRef(Pair.Key, EntryType, true);
+			Entry.bTagOnly = true; // synthetic: no backing metadata attribute, fed purely from tags
+			Entry.Attribute = nullptr;
+			Entry.bInitDefault = false;
+			Entry.Identifier = FPCGAttributeIdentifier(Pair.Key, PCGMetadataDomainID::Elements);
+			Entry.ElementsIdentifier = FPCGAttributeIdentifier(Pair.Key, PCGMetadataDomainID::Elements);
 		}
 	}
 
@@ -513,21 +447,21 @@ void FPCGExPointIOMerger::MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& Ta
 	if (bHasAttributes)
 	{
 		InternalTracker = MakeShared<FPCGExIntTracker>(
-			[PCGEX_ASYNC_THIS_CAPTURE, TaskManager]()
+		[PCGEX_ASYNC_THIS_CAPTURE, TaskManager]()
+		{
+			PCGEX_ASYNC_THIS
+
+			// Drop converted tags from the merged data-domain tags so they aren't duplicated on the output.
+			if (!This->ConvertedTagNames.IsEmpty())
 			{
-				PCGEX_ASYNC_THIS
+				This->UnionDataFacade->Source->Tags->Remove(This->ConvertedTagNames);
+			}
 
-				// Drop converted tags from the merged data-domain tags so they aren't duplicated on the output.
-				if (!This->ConvertedTagNames.IsEmpty())
-				{
-					This->UnionDataFacade->Source->Tags->Remove(This->ConvertedTagNames);
-				}
-
-				if (This->bWriteFacade)
-				{
-					This->UnionDataFacade->WriteFastest(TaskManager);
-				}
-			});
+			if (This->bWriteFacade)
+			{
+				This->UnionDataFacade->WriteFastest(TaskManager);
+			}
+		});
 
 		CopyProperties->OnCompleteCallback = [PCGEX_ASYNC_THIS_CAPTURE, TaskManager]()
 		{
@@ -551,7 +485,7 @@ void FPCGExPointIOMerger::MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& Ta
 			}
 		};
 	}
-
+	
 	CopyProperties->StartIterations(NumSources, 1);
 }
 

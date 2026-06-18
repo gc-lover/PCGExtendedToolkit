@@ -7,15 +7,11 @@
 #include "PCGExDataCommon.h"
 #include "Containers/PCGExScopedContainers.h"
 #include "Data/PCGExCachedSubSelection.h"
-#include "Data/PCGExCachedSubSelection.h"
 #include "Data/PCGExSubSelection.h"
 #include "Metadata/PCGAttributePropertySelector.h"
-#include "Metadata/PCGMetadataCommon.h"
 #include "Misc/ScopeRWLock.h"
 #include "Types/PCGExTypeOps.h"
-#include "Types/PCGExTypeOps.h"
 #include "Types/PCGExTypes.h"
-#include "UObject/Object.h"
 #include "UObject/Object.h"
 
 struct FPCGExContext;
@@ -63,7 +59,6 @@ namespace PCGExData
 			case EPCGMetadataTypes::Name:
 			case EPCGMetadataTypes::SoftObjectPath:
 			case EPCGMetadataTypes::SoftClassPath:
-			case EPCGMetadataTypes::Text:
 				return true;
 			default:
 				return false;
@@ -87,13 +82,6 @@ namespace PCGExData
 
 		EPCGMetadataTypes RealType = EPCGMetadataTypes::Unknown;
 		EPCGMetadataTypes WorkingType = EPCGMetadataTypes::Unknown;
-
-		// Cached attribute descriptor, populated by Capture() when the selector resolves to
-		// an actual attribute (point/extra-property selectors leave this default-constructed).
-		// Check SourceDesc.IsValid() before relying on its fields. Used by container-aware
-		// accessors in the compiled chain (FContainerIndex / FContainerCount); element size /
-		// alignment for the proxy itself is read from the underlying buffer via IBuffer::GetValueSize.
-		FPCGMetadataAttributeDesc SourceDesc;
 
 		TWeakPtr<FFacade> DataFacade;
 		const UPCGBasePointData* PointData = nullptr;
@@ -183,11 +171,8 @@ namespace PCGExData
 			return true;
 		}
 
-		// SubSelection configuration. SourceDesc is forwarded to the compiled
-		// chain so container-aware steps can classify against the attribute's
-		// container-ness. Pass nullptr for non-attribute sources.
-		void SetSubSelection(const FSubSelection& InSubSelection,
-		                     const FPCGMetadataAttributeDesc* SourceDesc = nullptr);
+		// SubSelection configuration
+		void SetSubSelection(const FSubSelection& InSubSelection);
 
 		// Role-specific initialization
 		virtual void InitForRole(EProxyRole InRole);
@@ -228,11 +213,6 @@ namespace PCGExData
 		{
 			return bWorkingTypeNeedsLifecycle;
 		}
-
-		// Value size/alignment for blend operation sizing.
-		// Returns the size from WorkingOps if available, otherwise falls back to descriptor or FScopedTypedValue::GetTypeSize.
-		virtual int32 GetValueSize() const;
-		virtual int32 GetValueAlignment() const;
 
 		//
 		// Convenience typed accessors - SAFE versions with proper lifecycle

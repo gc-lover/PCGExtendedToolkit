@@ -117,7 +117,7 @@ void UPCGExCustomActorDataPacker::PreloadObjectPaths(const FName& InAttributeNam
 		return;
 	}
 
-	if (Identity->ValueType == EPCGMetadataTypes::String)
+	if (Identity->UnderlyingType == EPCGMetadataTypes::String)
 	{
 		if (TSharedPtr<PCGExData::TArrayBuffer<FString>> Buffer = ReadBuffers->GetBuffer<FString>(InAttributeName))
 		{
@@ -129,7 +129,7 @@ void UPCGExCustomActorDataPacker::PreloadObjectPaths(const FName& InAttributeNam
 		}
 	}
 
-	if (Identity->ValueType == EPCGMetadataTypes::SoftObjectPath)
+	if (Identity->UnderlyingType == EPCGMetadataTypes::SoftObjectPath)
 	{
 		if (TSharedPtr<PCGExData::TArrayBuffer<FSoftObjectPath>> Buffer = ReadBuffers->GetBuffer<FSoftObjectPath>(InAttributeName))
 		{

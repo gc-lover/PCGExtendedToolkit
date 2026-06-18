@@ -43,7 +43,7 @@ void UPCGExInstancedFactory::FindSettingsOverrides(FPCGExContext* InContext, FNa
 
 		for (PCGExData::FAttributeIdentity& Identity : Infos->Identities)
 		{
-			PossibleOverrides.Add(Identity.Name, ParamData->Metadata->GetMutableAttribute(Identity.GetIdentifier()));
+			PossibleOverrides.Add(Identity.Identifier.Name, ParamData->Metadata->GetMutableAttribute(Identity.Identifier));
 		}
 	}
 
@@ -105,12 +105,11 @@ void UPCGExInstancedFactory::ApplyOverrides()
 			continue;
 		}
 
-		// Container/extended source attributes can't drive the typed FProperty setter -- skip silently
-		// (the override is a best-effort name-match anyway).
-		PCGExMetaHelpers::ExecuteWithRightType(PossibleOverride.Value, [&](auto DummyValue)
+		PCGExMetaHelpers::ExecuteWithRightType(PossibleOverride.Value->GetTypeId(), [&](auto DummyValue)
 		{
 			using T = decltype(DummyValue);
-			PCGExPropertyHelpers::TrySetFPropertyValue<T>(this, Property, PossibleOverride.Value->GetValueFromItemKey<T>(0));
+			const FPCGMetadataAttribute<T>* TypedAttribute = static_cast<FPCGMetadataAttribute<T>*>(PossibleOverride.Value);
+			PCGExPropertyHelpers::TrySetFPropertyValue<T>(this, Property, TypedAttribute->GetValue(0));
 		});
 	}
 }
