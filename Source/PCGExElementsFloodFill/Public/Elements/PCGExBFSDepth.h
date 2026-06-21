@@ -7,6 +7,7 @@
 #include "Containers/PCGExScopedContainers.h"
 
 #include "Core/PCGExClustersProcessor.h"
+#include "Core/PCGExFloodFillEdgeDirection.h"
 #include "Sampling/PCGExSamplingCommon.h"
 #include "PCGExBFSDepth.generated.h"
 
@@ -40,6 +41,11 @@ protected:
 	virtual bool SupportsDataStealing() const override
 	{
 		return true;
+	}
+
+	virtual bool SupportsEdgeSorting() const override
+	{
+		return EdgeDirectionOutput.RequiresSortingRules();
 	}
 
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
@@ -87,6 +93,10 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Outputs", meta=(PCG_NotOverridable, EditCondition="bWriteNormalizedDepth", EditCondtionHides, HideEditConditionToggle))
 	EPCGExBFSNormalizedDepthMode NormalizedDepthMode = EPCGExBFSNormalizedDepthMode::Global;
 
+	/** Output the BFS traversal direction onto each edge, in propagation order (away from the seed). */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Outputs", meta=(PCG_Overridable))
+	FPCGExFloodFillEdgeDirectionDetails EdgeDirectionOutput;
+
 	/** Whether to use an octree for closest node search. Depending on your dataset, this may be faster or slower. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Performance, meta=(PCG_NotOverridable, AdvancedDisplay))
 	bool bUseOctreeSearch = false;
@@ -102,6 +112,8 @@ struct FPCGExBFSDepthContext final : FPCGExClustersProcessorContext
 	TSharedPtr<PCGExData::FFacade> SeedsDataFacade;
 
 	PCGEX_FOREACH_FIELD_BFS_DEPTH(PCGEX_OUTPUT_DECL_TOGGLE)
+
+	FPCGExFloodFillEdgeDirectionDetails EdgeDirectionOutput;
 
 protected:
 	PCGEX_ELEMENT_BATCH_EDGE_DECL
@@ -136,6 +148,8 @@ namespace PCGExBFSDepth
 		TSharedPtr<PCGExMT::TScopedArray<FIntPoint>> SeedNodeIndices;
 		TArray<FIntPoint> CollectedSeeds;
 
+		FPCGExFloodFillEdgeDirectionDetails EdgeDirectionDetails;
+
 		void ComputeNormalizedDepth();
 
 	public:
@@ -150,6 +164,7 @@ namespace PCGExBFSDepth
 		double* NormalizedDepthData = nullptr;
 
 		virtual bool Process(const TSharedPtr<PCGExMT::FTaskManager>& InTaskManager) override;
+		virtual void CompleteWork() override;
 
 		void RunBFS();
 	};
@@ -160,8 +175,11 @@ namespace PCGExBFSDepth
 		TSharedPtr<PCGExData::TBuffer<double>> NormalizedDepthWriter;
 
 	public:
+		FPCGExFloodFillEdgeDirectionDetails EdgeDirectionOutput;
+
 		FBatch(FPCGExContext* InContext, const TSharedRef<PCGExData::FPointIO>& InVtx, TArrayView<TSharedRef<PCGExData::FPointIO>> InEdges);
 
+		virtual void RegisterBuffersDependencies(PCGExData::FFacadePreloader& FacadePreloader) override;
 		virtual void OnProcessingPreparationComplete() override;
 		virtual bool PrepareSingle(const TSharedPtr<PCGExClusterMT::IProcessor>& InProcessor) override;
 		virtual void Write() override;

@@ -18,7 +18,7 @@ PCGExData::EIOInit UPCGExBFSDepthSettings::GetMainOutputInitMode() const
 
 PCGExData::EIOInit UPCGExBFSDepthSettings::GetEdgeOutputInitMode() const
 {
-	return PCGExData::EIOInit::Forward;
+	return EdgeDirectionOutput.ResolveEdgeInitMode(WantsDataStealing());
 }
 
 TArray<FPCGPinProperties> UPCGExBFSDepthSettings::InputPinProperties() const
@@ -44,6 +44,9 @@ bool FPCGExBFSDepthElement::Boot(FPCGExContext* InContext) const
 
 	PCGEX_CONTEXT_AND_SETTINGS(BFSDepth)
 	PCGEX_FOREACH_FIELD_BFS_DEPTH(PCGEX_OUTPUT_VALIDATE_NAME)
+
+	Context->EdgeDirectionOutput = Settings->EdgeDirectionOutput;
+	Context->EdgeDirectionOutput.ValidateNames(Context);
 
 	Context->SeedsDataFacade = PCGExData::TryGetSingleFacade(Context, PCGExCommon::Labels::SourceSeedsLabel, false, true);
 	if (!Context->SeedsDataFacade)
@@ -99,6 +102,12 @@ namespace PCGExBFSDepth
 		}
 
 		if (Context->SeedsDataFacade->GetNum() <= 0)
+		{
+			return false;
+		}
+
+		EdgeDirectionDetails = Context->EdgeDirectionOutput;
+		if (EdgeDirectionDetails.WantsDirection() && !EdgeDirectionDetails.InitForProcessor(Context, GetParentBatch<FBatch>()->EdgeDirectionOutput, EdgeDataFacade))
 		{
 			return false;
 		}
@@ -317,6 +326,12 @@ namespace PCGExBFSDepth
 		{
 			ComputeNormalizedDepth();
 		}
+
+		// Cross/back edges aren't seen during discovery, so write every visited-visited edge in one pass.
+		if (EdgeDirectionDetails.IsActive())
+		{
+			EdgeDirectionDetails.WriteFromNodeDepths(Cluster.Get(), Depths);
+		}
 	}
 
 	void FProcessor::ComputeNormalizedDepth()
@@ -433,6 +448,12 @@ namespace PCGExBFSDepth
 			);
 	}
 
+	void FProcessor::CompleteWork()
+	{
+		// Edge directions are written synchronously in RunBFS, so the facade is ready to flush here.
+		if (EdgeDirectionDetails.IsActive()) { EdgeDataFacade->WriteFastest(TaskManager); }
+	}
+
 #pragma endregion
 
 #pragma region PCGExBFSDepth::FBatch
@@ -440,6 +461,12 @@ namespace PCGExBFSDepth
 	FBatch::FBatch(FPCGExContext* InContext, const TSharedRef<PCGExData::FPointIO>& InVtx, TArrayView<TSharedRef<PCGExData::FPointIO>> InEdges)
 		: TBatch(InContext, InVtx, InEdges)
 	{
+	}
+
+	void FBatch::RegisterBuffersDependencies(PCGExData::FFacadePreloader& FacadePreloader)
+	{
+		TBatch<FProcessor>::RegisterBuffersDependencies(FacadePreloader);
+		EdgeDirectionOutput.RegisterBuffersDependencies(ExecutionContext, FacadePreloader);
 	}
 
 	void FBatch::OnProcessingPreparationComplete()
@@ -454,6 +481,14 @@ namespace PCGExBFSDepth
 			{
 				NormalizedDepthWriter = OutputFacade->GetWritable<double>(Settings->NormalizedDepthAttributeName, 0.0, true, PCGExData::EBufferInit::New);
 			}
+		}
+
+		// Build the shared edge-direction sorter before the base triggers RegisterBuffersDependencies.
+		EdgeDirectionOutput = Context->EdgeDirectionOutput;
+		if (!EdgeDirectionOutput.InitForBatch(Context, VtxDataFacade, Context->GetEdgeSortingRules()))
+		{
+			bIsBatchValid = false;
+			return;
 		}
 
 		TBatch<FProcessor>::OnProcessingPreparationComplete();
