@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Containers/PCGExScopedContainers.h"
 
+#include "Core/PCGExBFSTriggerCount.h"
 #include "Core/PCGExClustersProcessor.h"
 #include "Core/PCGExFloodFillEdgeDirection.h"
 #include "Sampling/PCGExSamplingCommon.h"
@@ -15,6 +16,14 @@
 MACRO(Depth, int32, -1)\
 MACRO(Distance, double, -1)\
 MACRO(SeedIndex, int32, -1)
+
+namespace PCGExBFSDepth
+{
+	namespace Labels
+	{
+		const FName SourceTriggerFiltersLabel = FName("TriggerFilters");
+	}
+}
 
 UENUM()
 enum class EPCGExBFSNormalizedDepthMode : uint8
@@ -97,6 +106,10 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Outputs", meta=(PCG_Overridable))
 	FPCGExFloodFillEdgeDirectionDetails EdgeDirectionOutput;
 
+	/** Output a running count of "trigger" vtx (those passing the Vtx Filters) crossed along the BFS path. Adds a required Vtx Filters input. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Outputs", meta=(PCG_Overridable))
+	FPCGExBFSTriggerCountDetails TriggerCount;
+
 	/** Whether to use an octree for closest node search. Depending on your dataset, this may be faster or slower. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Performance, meta=(PCG_NotOverridable, AdvancedDisplay))
 	bool bUseOctreeSearch = false;
@@ -114,6 +127,9 @@ struct FPCGExBFSDepthContext final : FPCGExClustersProcessorContext
 	PCGEX_FOREACH_FIELD_BFS_DEPTH(PCGEX_OUTPUT_DECL_TOGGLE)
 
 	FPCGExFloodFillEdgeDirectionDetails EdgeDirectionOutput;
+
+	FPCGExBFSTriggerCountDetails TriggerCount;
+	TArray<TObjectPtr<const UPCGExPointFilterFactoryData>> VtxFilterFactories;
 
 protected:
 	PCGEX_ELEMENT_BATCH_EDGE_DECL
@@ -150,6 +166,9 @@ namespace PCGExBFSDepth
 
 		FPCGExFloodFillEdgeDirectionDetails EdgeDirectionDetails;
 
+		const FPCGExBFSTriggerCountDetails* TriggerCountPtr = nullptr; // Points at the batch's instance (shared vtx writer)
+		TArray<int32> TriggerCounts;                                   // BFS-path trigger count per node
+
 		void ComputeNormalizedDepth();
 
 	public:
@@ -176,6 +195,7 @@ namespace PCGExBFSDepth
 
 	public:
 		FPCGExFloodFillEdgeDirectionDetails EdgeDirectionOutput;
+		FPCGExBFSTriggerCountDetails TriggerCount;
 
 		FBatch(FPCGExContext* InContext, const TSharedRef<PCGExData::FPointIO>& InVtx, TArrayView<TSharedRef<PCGExData::FPointIO>> InEdges);
 
