@@ -117,13 +117,13 @@ namespace PCGExPointIOMerger
 		{
 			return;
 		}
+		
+		if (!OutBuffer) { return; }
 
-		TSharedPtr<PCGExData::TArrayBuffer<T>> OutElementsBuffer = StaticCastSharedPtr<PCGExData::TArrayBuffer<T>>(OutBuffer);
-		TSharedPtr<PCGExData::TSingleValueBuffer<T>> OutDataBuffer = StaticCastSharedPtr<PCGExData::TSingleValueBuffer<T>>(OutBuffer);
-
-		if (OutElementsBuffer)
+		if (OutBuffer->GetUnderlyingDomain() == PCGExData::EDomainType::Elements)
 		{
 			// We are writing to elements domain
+			const TSharedPtr<PCGExData::TArrayBuffer<T>> OutElementsBuffer = StaticCastSharedPtr<PCGExData::TArrayBuffer<T>>(OutBuffer);
 
 			if (TypedInAttribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data)
 			{
@@ -165,9 +165,10 @@ namespace PCGExPointIOMerger
 				}
 			}
 		}
-		else if (OutDataBuffer)
+		else if (OutBuffer->GetUnderlyingDomain() == PCGExData::EDomainType::Data)
 		{
 			// We are writing to data domain
+			const TSharedPtr<PCGExData::TSingleValueBuffer<T>> OutDataBuffer = StaticCastSharedPtr<PCGExData::TSingleValueBuffer<T>>(OutBuffer);
 
 			if (TypedInAttribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data)
 			{
