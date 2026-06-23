@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "StructUtils/InstancedStruct.h"
 
 #include "PCGExAssetCollectionTypes.h"
 #include "PCGExAssetGrammar.h"
@@ -98,6 +99,16 @@ struct PCGEXCOLLECTIONS_API FPCGExAssetStagingData
 	UPROPERTY(VisibleAnywhere, Category = Settings)
 	FBox Bounds = FBox(ForceInit);
 
+	/**
+	 * Optional modifier that derives AlteredBounds (the bounds used for fitting, spacing and
+	 * best-fit selection) from the original asset-derived Bounds. Null = AlteredBounds mirrors
+	 * Bounds. The bounds applied to the mesh itself always remain the original ones.
+	 */
+	UPROPERTY(EditAnywhere, Category = Settings, meta=(BaseStruct="/Script/PCGExCollections.PCGExStagingBoundsModifier", ExcludeBaseStruct))
+	FInstancedStruct BoundsStagingModifier;
+	
+	FBox AlteredBounds = FBox(ForceInit);
+	
 	template <typename T>
 	T* LoadSync(FPCGExContext* InContext = nullptr) const
 	{
@@ -225,7 +236,7 @@ struct PCGEXCOLLECTIONS_API FPCGExAssetCollectionEntry
 #pragma region DEPRECATED
 	
 	/** LEGACY (schema v0). Migrated into AssetGrammar by PostLoad when SubGrammarMode==Override. */
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGExCollectionGrammarDetails CollectionGrammar_DEPRECATED;
 	
 #pragma endregion
@@ -906,7 +917,7 @@ public:
 	TArray<TObjectPtr<UPCGExCollectionStagingPipeline>> StagingPipelines;
 
 	/** LEGACY single-pipeline slot. Migrated into StagingPipelines by PostLoad. */
-	UPROPERTY(Instanced, meta=(DeprecatedProperty))
+	UPROPERTY(Instanced, meta=(DeprecatedProperty, ScriptNoExport))
 	TObjectPtr<UPCGExCollectionStagingPipeline> StagingPipeline_DEPRECATED;
 #endif
 
@@ -977,7 +988,7 @@ public:
 #pragma region DEPRECATED
 	
 	/** LEGACY (schema v0). Migrated into SubCollectionGrammar by PostLoad. */
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGExCollectionGrammarDetails CollectionGrammar_DEPRECATED;
 	
 #pragma endregion

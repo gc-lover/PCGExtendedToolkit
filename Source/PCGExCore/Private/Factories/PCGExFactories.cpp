@@ -47,7 +47,6 @@ namespace PCGExFactories
 				}
 
 				OutFactories.AddUnique(Factory);
-				Factory->RegisterAssetDependencies(InContext);
 				Factory->RegisterConsumableAttributes(InContext);
 			}
 			else
