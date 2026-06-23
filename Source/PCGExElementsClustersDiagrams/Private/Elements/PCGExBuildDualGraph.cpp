@@ -44,6 +44,7 @@ bool FPCGExBuildDualGraphElement::Boot(FPCGExContext* InContext) const
 
 	PCGEX_CONTEXT_AND_SETTINGS(BuildDualGraph)
 
+	
 	// Validate attribute names
 	if (Settings->bWriteEdgeLength)
 	{
@@ -186,7 +187,7 @@ namespace PCGExBuildDualGraph
 			return true;
 		}
 
-		DualVtxIO->Tags->Reset();
+		Context->VtxCarryOverDetails.Prune(DualVtxIO->Tags.Get());
 		DualVtxIO->IOIndex = BatchIndex;
 		PCGExClusters::Helpers::CleanupClusterData(DualVtxIO);
 

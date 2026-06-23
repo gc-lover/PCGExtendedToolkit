@@ -42,9 +42,12 @@ void UPCGExAssetStagingSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOu
 	if (SelectorMode == EPCGExSelectorMode::Unset)
 	{
 		SelectorMode = EPCGExSelectorMode::External;
-		PCGEX_IF_VERSION_LOWER(1, 75, 19) { SelectorMode = EPCGExSelectorMode::Legacy; }
+		PCGEX_IF_VERSION_LOWER(1, 75, 19)
+		{
+			SelectorMode = EPCGExSelectorMode::Legacy;
+		}
 	}
-	
+
 	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
 }
 
@@ -562,10 +565,10 @@ namespace PCGExAssetStaging
 		const bool bConsiderEntryJustification = Settings->bConsiderEntryJustification;
 		UPCGBasePointData* OutPointData = PointDataFacade->GetOut();
 
-		const TPCGValueRange<FTransform> OutTransforms = OutPointData->GetTransformValueRange(false);
+		const TPCGValueRange<FTransform> OutTransforms = bLocalApplyFitting ? OutPointData->GetTransformValueRange(false) : TPCGValueRange<FTransform>();
 		const TPCGValueRange<FVector> OutBoundsMin = bLocalApplyFitting ? OutPointData->GetBoundsMinValueRange(false) : TPCGValueRange<FVector>();
 		const TPCGValueRange<FVector> OutBoundsMax = bLocalApplyFitting ? OutPointData->GetBoundsMaxValueRange(false) : TPCGValueRange<FVector>();
-		const TConstPCGValueRange<int32> Seeds = OutPointData->GetConstSeedValueRange();
+		const TConstPCGValueRange<int32> Seeds = PointDataFacade->GetIn()->GetConstSeedValueRange();
 		const TPCGValueRange<float> Densities = bUsesDensity ? OutPointData->GetDensityValueRange(false) : TPCGValueRange<float>();
 
 		int32 LocalNumInvalid = 0;
@@ -710,7 +713,7 @@ namespace PCGExAssetStaging
 
 				FTransform& OutTransform = OutTransforms[Index];
 				FVector OutTranslation = FVector::ZeroVector;
-				FBox OutBounds = Entry->Staging.Bounds;
+				FBox OutBounds = Entry->Staging.AlteredBounds;
 
 				const FPCGExFittingVariations& EntryVariations = Entry->GetVariations(EntryHost);
 
