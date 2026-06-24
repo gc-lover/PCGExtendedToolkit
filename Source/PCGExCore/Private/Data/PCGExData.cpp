@@ -12,6 +12,7 @@
 #include "Data/PCGExDataHelpers.h"
 #include "Data/PCGExDataTags.h"
 #include "Data/PCGExPointIO.h"
+#include "Data/PCGExProxyData.h"
 #include "Data/PCGPointData.h"
 #include "Helpers/PCGExArrayHelpers.h"
 #include "Metadata/Accessors/PCGAttributeAccessorHelpers.h"
@@ -987,6 +988,19 @@ template class PCGEXCORE_API TSingleValueBuffer<_TYPE>;
 		return SharedContext.Get();
 	}
 
+	IBufferProxyPool& FFacade::GetProxyPool()
+	{
+		// Double-checked lazy init: the common case (already created) takes only a read lock.
+		{
+			FReadScopeLock ReadLock(ProxyPoolLock);
+			if (ProxyPool) { return *ProxyPool; }
+		}
+
+		FWriteScopeLock WriteLock(ProxyPoolLock);
+		if (!ProxyPool) { ProxyPool = MakeShared<IBufferProxyPool>(); }
+		return *ProxyPool;
+	}
+
 	FFacade::FFacade(const TSharedRef<FPointIO>& InSource)
 		: Source(InSource)
 		  , Idx(InSource->IOIndex)
@@ -1339,7 +1353,7 @@ template PCGEXCORE_API const FPCGMetadataAttribute<_TYPE>* FFacade::FindConstAtt
 						return;
 					}
 					WriteBuffer(nullptr, Buffer, false);
-				}, 1);
+				}, /*Threshold=*/2);
 				
 				/*
 				for (int i = 0; i < Buffers.Num(); i++)

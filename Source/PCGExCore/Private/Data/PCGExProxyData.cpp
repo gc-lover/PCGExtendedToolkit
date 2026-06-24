@@ -136,6 +136,31 @@ namespace PCGExData
 		return true;
 	}
 
+	bool FProxyDescriptor::Capture_Unsafe(FPCGExContext* InContext, const FPCGAttributePropertyInputSelector& InSelector, const EIOSide InSide, const EPCGMetadataTypes InKnownRealType)
+	{
+		const TSharedPtr<FFacade> InFacade = DataFacade.Pin();
+		check(InFacade);
+
+		// Trust the caller's type and side: no TryGetTypeAndSource probe.
+		Side = HasFlag(EProxyFlags::Constant) ? EIOSide::In : InSide;
+		RealType = InKnownRealType;
+
+		PointData = InFacade->Source->GetData(Side);
+		Selector = InSelector.CopyAndFixLast(InFacade->Source->GetData(Side));
+
+		UpdateSubSelection();
+		WorkingType = SubSelection.GetSubType(RealType);
+
+		return RealType != EPCGMetadataTypes::Unknown;
+	}
+
+	bool FProxyDescriptor::CaptureStrict_Unsafe(FPCGExContext* InContext, const FPCGAttributePropertyInputSelector& InSelector, const EIOSide InSide, const EPCGMetadataTypes InKnownRealType)
+	{
+		// The strict side-match guarantee is the caller's assertion in the unsafe path: the side is
+		// taken as given and never flipped, so this just forwards to Capture_Unsafe.
+		return Capture_Unsafe(InContext, InSelector, InSide, InKnownRealType);
+	}
+
 	uint32 GetSelectorTypeHash(const FPCGAttributePropertyInputSelector& Selector)
 	{
 		EPCGAttributePropertySelection Selection = Selector.GetSelection();
@@ -245,6 +270,11 @@ namespace PCGExData
 	{
 		const uint64 Key = GetTypeHash(Descriptor);
 
+		// In-side descriptors read shared, stable upstream input: retain the proxy strongly so
+		// it survives for the pool owner's lifetime and is reused by every consumer. Out-side
+		// descriptors are this data's own transient output: keep them weak (die with the consumer).
+		const bool bRetain = Descriptor.Side == EIOSide::In;
+
 		// Read-locked fast path: cache hits proceed in parallel across threads.
 		// Critical for hot descriptors requested many times (e.g. shared blending
 		// inputs across N IOs); without this, every repeat lookup would serialize on
@@ -255,9 +285,9 @@ namespace PCGExData
 		// the TWeakPtr's two-pointer assignment, invalidating any pointer we'd held
 		// past the lock.
 		TSharedPtr<IBufferProxy> Pinned;
-		ProxyMap.ReadOrSkip(Key, [&](const TWeakPtr<IBufferProxy>& Slot)
+		ProxyMap.ReadOrSkip(Key, [&](const FProxyPoolEntry& Slot)
 		{
-			Pinned = Slot.Pin();
+			Pinned = Slot.Weak.Pin();
 		});
 		if (Pinned) { return Pinned; }
 
@@ -266,16 +296,21 @@ namespace PCGExData
 		TSharedPtr<IBufferProxy> Result;
 		ProxyMap.FindOrAddAndUpdate(
 			Key,
-			[&](TWeakPtr<IBufferProxy>& Slot)
+			[&](FProxyPoolEntry& Slot)
 			{
-				if (TSharedPtr<IBufferProxy> Pinned = Slot.Pin())
+				if (TSharedPtr<IBufferProxy> Existing = Slot.Weak.Pin())
 				{
-					Result = Pinned;
+					Result = Existing;
+					if (bRetain && !Slot.Strong) { Slot.Strong = Existing; }
 					return;
 				}
 
 				Result = Factory();
-				if (Result) { Slot = Result; }
+				if (Result)
+				{
+					Slot.Weak = Result;
+					if (bRetain) { Slot.Strong = Result; }
+				}
 			});
 		return Result;
 	}
