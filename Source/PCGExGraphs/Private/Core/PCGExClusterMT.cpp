@@ -836,7 +836,7 @@ namespace PCGExClusterMT
 
 				NewProcessor->bIsTrivial = IO->GetNum() < PCGEX_CORE_SETTINGS.SmallClusterSize;
 				Candidates[i] = NewProcessor;
-			}, 1);
+			}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 
 		{
 			Processors.Reserve(Candidates.Num());
@@ -879,7 +879,7 @@ namespace PCGExClusterMT
 				{
 					const TSharedRef<IProcessor>& Processor = Processors[i];
 					Processor->bIsProcessorValid = Processor->Process(TaskManager);
-				}, 1);
+				}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 		}
 
 		OnInitialPostProcess();
@@ -938,7 +938,7 @@ namespace PCGExClusterMT
 					{
 						Processor->CompleteWork();
 					}
-				}, 1);
+				}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 		}
 	}
 
@@ -972,7 +972,7 @@ namespace PCGExClusterMT
 					{
 						Processor->Write();
 					}
-				}, 1);
+				}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 		}
 
 		if (bWriteVtxDataFacade && bIsBatchValid)

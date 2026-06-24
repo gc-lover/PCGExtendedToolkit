@@ -1339,7 +1339,7 @@ template PCGEXCORE_API const FPCGMetadataAttribute<_TYPE>* FFacade::FindConstAtt
 						return;
 					}
 					WriteBuffer(nullptr, Buffer, false);
-				}, 1);
+				}, /*Threshold=*/2);
 				
 				/*
 				for (int i = 0; i < Buffers.Num(); i++)
