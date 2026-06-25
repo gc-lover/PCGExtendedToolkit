@@ -1247,6 +1247,18 @@ template PCGEXCORE_API const FPCGMetadataAttribute<_TYPE>* FFacade::FindConstAtt
 #undef PCGEX_TYPED_WRITABLE
 	}
 
+	TSharedPtr<IBuffer> FFacade::GetWritable(const EPCGMetadataTypes Type, const FPCGAttributeIdentifier& InIdentifier, EBufferInit Init)
+	{
+#define PCGEX_TYPED_WRITABLE(_TYPE, _ID, ...) case EPCGMetadataTypes::_ID: return GetWritable<_TYPE>(InIdentifier, Init);
+		switch (Type)
+		{
+		PCGEX_FOREACH_SUPPORTEDTYPES(PCGEX_TYPED_WRITABLE)
+		default:
+			return nullptr;
+		}
+#undef PCGEX_TYPED_WRITABLE
+	}
+
 	TSharedPtr<IBuffer> FFacade::GetReadable(const FAttributeIdentity& Identity, const EIOSide InSide, const bool bSupportScoped)
 	{
 		TSharedPtr<IBuffer> Buffer = nullptr;
