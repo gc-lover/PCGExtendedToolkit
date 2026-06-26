@@ -15,11 +15,6 @@
 
 #include "PCGExSegmentCrossFilter.generated.h"
 
-namespace PCGExMatching
-{
-	class FDataMatcher;
-}
-
 UENUM()
 enum class EPCGExSegmentCrossWinding : uint8
 {
@@ -61,7 +56,7 @@ struct FPCGExSegmentCrossFilterConfig
 	bool bIgnoreSelf = true;
 
 	/** Data matching settings. When enabled, only paths whose data matches the input being tested will be considered. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, ShowOnlyInnerProperties))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
 	FPCGExFilterMatchingDetails DataMatching;
 };
 
@@ -99,7 +94,7 @@ namespace PCGExPointFilter
 			  , TypedFilterFactory(InFactory)
 		{
 			Handler = TypedFilterFactory->CreateHandler();
-			Handler->Init(EPCGExSplineCheckType::IsOn);
+			Handler->Init(EPCGExSplineCheckType::IsOn, EPCGExDistance::Center);
 			Handler->ToleranceScaleFactor = FVector(0, 1, 1);
 		}
 
@@ -109,10 +104,6 @@ namespace PCGExPointFilter
 
 		const TObjectPtr<const UPCGExSegmentCrossFilterFactory> TypedFilterFactory;
 		TSharedPtr<PCGExPathInclusion::FHandler> Handler;
-
-		// Per-point matching -- see FDistanceFilter for full explanation.
-		TSharedPtr<PCGExMatching::FDataMatcher> InverseMatcher;
-		bool bNoMatchResult = false;
 
 		TConstPCGValueRange<FTransform> InTransforms;
 

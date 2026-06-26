@@ -11,10 +11,13 @@
 #include "Helpers/PCGExArrayHelpers.h"
 #include "Metadata/Accessors/PCGAttributeAccessorHelpers.h"
 #include "Types/PCGExAttributeIdentity.h"
+#include "Utils/PCGExAttributeCopy.h"
 
 #include "UObject/Object.h"
 
+class FPCGExIntTracker;
 struct FPCGExCarryOverDetails;
+struct FPCGExNameFiltersDetails;
 
 namespace PCGExMT
 {
@@ -25,22 +28,11 @@ namespace PCGExData
 {
 	class FPointIO;
 	class FFacade;
+	class IDataValue;
 }
 
 namespace PCGExPointIOMerger
 {
-	struct PCGEXBLENDING_API FIdentityRef : PCGExData::FAttributeIdentity
-	{
-		const FPCGMetadataAttributeBase* Attribute = nullptr;
-		FPCGAttributeIdentifier ElementsIdentifier;
-		bool bInitDefault = false;
-
-		FIdentityRef();
-		FIdentityRef(const FIdentityRef& Other);
-		FIdentityRef(const FAttributeIdentity& Other);
-		FIdentityRef(const FName InName, const EPCGMetadataTypes InUnderlyingType, const bool InAllowsInterpolation);
-	};
-
 	struct PCGEXBLENDING_API FMergeScope
 	{
 		PCGExMT::FScope Read;
@@ -57,10 +49,14 @@ class PCGEXBLENDING_API FPCGExPointIOMerger final : public TSharedFromThis<FPCGE
 	friend class FPCGExAttributeMergeTask;
 
 public:
-	TArray<PCGExPointIOMerger::FIdentityRef> UniqueIdentities;
+	TArray<PCGExData::FAttributeIdentity> UniqueIdentities;
 	TSharedRef<PCGExData::FFacade> UnionDataFacade;
 	TArray<TSharedPtr<PCGExData::FPointIO>> IOSources;
 	TArray<PCGExPointIOMerger::FMergeScope> Scopes;
+
+	// Per-source tag values for names converted to attributes (entry size == IOSources.Num(), null where the
+	// source lacks the tag); FCopyAttributeTask uses it as the per-source fallback. See MergeAsync.
+	TMap<FName, TArray<TSharedPtr<PCGExData::IDataValue>>> TagValuesByName;
 
 	explicit FPCGExPointIOMerger(const TSharedRef<PCGExData::FFacade>& InUnionDataFacade);
 	~FPCGExPointIOMerger();
@@ -69,17 +65,32 @@ public:
 	PCGExPointIOMerger::FMergeScope& Append(const TSharedPtr<PCGExData::FPointIO>& InData, const PCGExMT::FScope ReadScope);
 	PCGExPointIOMerger::FMergeScope& Append(const TSharedPtr<PCGExData::FPointIO>& InData);
 	void Append(const TArray<TSharedPtr<PCGExData::FPointIO>>& InData);
-	void MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager, const FPCGExCarryOverDetails* InCarryOverDetails, const TSet<FName>* InIgnoredAttributes = nullptr);
+	void MergeAsync(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager, const FPCGExCarryOverDetails* InCarryOverDetails, const TSet<FName>* InIgnoredAttributes = nullptr, const bool bWriteUnion = false, const FPCGExNameFiltersDetails* InTagsToAttributes = nullptr);
 
 	bool WantsDataToElements() const
 	{
 		return bDataDomainToElements;
 	}
 
+	bool WantsInitDefault() const
+	{
+		return bInitDefault;
+	}
+
+	TSharedPtr<FPCGExIntTracker> InternalTracker;
+	
 protected:
+
+	bool bWriteFacade = false;
 	void CopyProperties(const int32 Index);
 	PCGExPointIOMerger::FMergeScope NullScope;
 	bool bDataDomainToElements = false;
+	// Merger-wide: whether output buffers should be initialized from each attribute's default value
+	// (vs. a zero-init T{}). Sourced from FPCGExCarryOverDetails::bPreserveAttributesDefaultValue.
+	bool bInitDefault = false;
+
+	// Tag keys converted to attributes this merge; stripped from the merged data-domain tags before write.
+	TSet<FName> ConvertedTagNames;
 	int32 NumCompositePoints = 0;
 	EPCGPointNativeProperties AllocateProperties = EPCGPointNativeProperties::None;
 
@@ -91,88 +102,19 @@ protected:
 namespace PCGExPointIOMerger
 {
 	template <typename T>
-	static void ScopeMerge(const FMergeScope& Scope, const FIdentityRef& Identity, const TSharedPtr<PCGExData::FPointIO>& SourceIO, const TSharedPtr<PCGExData::TBuffer<T>>& OutBuffer)
+	static void ScopeMerge(const FMergeScope& Scope, const PCGExData::FAttributeIdentity& Identity, const TSharedPtr<PCGExData::FPointIO>& SourceIO, const TSharedPtr<PCGExData::TBuffer<T>>& OutBuffer)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(PCGExPointIOMerger::ScopeMerge);
 
-		UPCGMetadata* InMetadata = SourceIO->GetIn()->Metadata;
-
-		const FPCGMetadataAttribute<T>* TypedInAttribute = PCGExMetaHelpers::TryGetConstAttribute<T>(InMetadata, Identity.Identifier);
+		const FPCGMetadataAttributeBase* TypedInAttribute = PCGExMetaHelpers::TryGetConstAttribute<T>(SourceIO->GetIn()->Metadata, Identity.GetIdentifier());
 		if (!TypedInAttribute)
 		{
 			return;
 		}
 
-		TSharedPtr<PCGExData::TArrayBuffer<T>> OutElementsBuffer = StaticCastSharedPtr<PCGExData::TArrayBuffer<T>>(OutBuffer);
-		TSharedPtr<PCGExData::TSingleValueBuffer<T>> OutDataBuffer = StaticCastSharedPtr<PCGExData::TSingleValueBuffer<T>>(OutBuffer);
-
-		if (OutElementsBuffer)
-		{
-			// We are writing to elements domain
-
-			if (TypedInAttribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data)
-			{
-				// From a data domain
-				const T Value = PCGExData::Helpers::ReadDataValue(TypedInAttribute);
-				for (int Index = Scope.Write.Start; Index < Scope.Write.End; Index++)
-				{
-					OutElementsBuffer->SetValue(Index, Value);
-				}
-			}
-			else
-			{
-				check(Scope.Read.Count == Scope.Write.Count)
-
-				// From elements domain
-				TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(TypedInAttribute, InMetadata);
-
-				if (!InAccessor.IsValid())
-				{
-					return;
-				}
-
-				TArrayView<T> InRange = MakeArrayView(OutElementsBuffer->GetOutValues()->GetData() + Scope.Write.Start, Scope.Write.Count);
-
-				if (Scope.bReverse)
-				{
-					TArray<T> ReadData;
-					PCGExArrayHelpers::InitArray(ReadData, Scope.Write.Count);
-
-					InAccessor->GetRange<T>(ReadData, Scope.Read.Start, *SourceIO->GetInKeys());
-					for (int i = 0; i < Scope.Read.Count; i++)
-					{
-						InRange[i] = ReadData.Last(i);
-					}
-				}
-				else
-				{
-					InAccessor->GetRange<T>(InRange, Scope.Read.Start, *SourceIO->GetInKeys());
-				}
-			}
-		}
-		else if (OutDataBuffer)
-		{
-			// We are writing to data domain
-
-			if (TypedInAttribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data)
-			{
-				// From data domain
-				OutDataBuffer->SetValue(0, PCGExData::Helpers::ReadDataValue(TypedInAttribute));
-			}
-			else
-			{
-				// From elements domain
-				TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(TypedInAttribute, InMetadata);
-				if (!InAccessor.IsValid())
-				{
-					return;
-				}
-				if (T Value = T{};
-					InAccessor->Get(Value, Scope.Read.Start, *SourceIO->GetInKeys()))
-				{
-					OutDataBuffer->SetValue(0, Value);
-				}
-			}
-		}
+		// The source-domain x output-domain matrix lives in CopyAttributeScoped, shared with the blenders.
+		PCGExBlending::CopyAttributeScoped<T>(
+			PCGExBlending::FAttributeCopyScope{Scope.Read, Scope.Write, Scope.bReverse, Scope.ReadIndices},
+			TypedInAttribute, SourceIO, OutBuffer);
 	}
 }

@@ -88,6 +88,13 @@ struct FPCGExPathSolidificationRadiusDetails : public FPCGExPathSolidificationAx
 	FPCGAttributePropertyInputSelector RadiusAttribute;
 
 	PCGEX_SETTING_VALUE_DECL(Radius, double)
+
+	/** Slide factor that shifts the bounds along this axis while preserving their size (2*Radius).
+	 *  0.5 = centered (min = -Radius, max = +Radius),
+	 *  0   = shifted fully negative (min = -2*Radius, max = 0),
+	 *  1   = shifted fully positive (min = 0, max = +2*Radius). */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable, EditCondition="RadiusInput != EPCGExInputValueToggle::Disabled", EditConditionHides))
+	FPCGExInputShorthandSelectorDouble01 Slide = FPCGExInputShorthandSelectorDouble01(NAME_None, 0.5, false);
 };
 
 /**
@@ -104,7 +111,7 @@ public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
 	virtual void PCGExApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 	PCGEX_NODE_INFOS(PathSolidify, "Path : Solidify", "Solidify a path.");
 #endif
 
@@ -189,13 +196,13 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType NormalType_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector NormalAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bInvertDirection_DEPRECATED = false;
 
 #pragma endregion
@@ -206,56 +213,56 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType SolidificationLerpInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector SolidificationLerpAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double SolidificationLerpConstant_DEPRECATED = 0;
 
 #pragma endregion
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExMinimalAxis SolidificationAxis_DEPRECATED = EPCGExMinimalAxis::X;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bWriteRadiusX_DEPRECATED = false;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RadiusXInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RadiusXSourceAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RadiusXConstant_DEPRECATED = 1;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bWriteRadiusY_DEPRECATED = false;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RadiusYInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RadiusYSourceAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RadiusYConstant_DEPRECATED = 1;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bWriteRadiusZ_DEPRECATED = false;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RadiusZInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RadiusZSourceAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RadiusZConstant_DEPRECATED = 1;
 
 #pragma endregion
@@ -295,9 +302,11 @@ namespace PCGExPathSolidify
 
 		TSharedPtr<PCGExDetails::TSettingValue<bool>> SecondaryFlip;
 		TSharedPtr<PCGExDetails::TSettingValue<double>> SecondaryRadius;
+		TSharedPtr<PCGExDetails::TSettingValue<double>> SecondarySlide;
 
 		TSharedPtr<PCGExDetails::TSettingValue<bool>> TertiaryFlip;
 		TSharedPtr<PCGExDetails::TSettingValue<double>> TertiaryRadius;
+		TSharedPtr<PCGExDetails::TSettingValue<double>> TertiarySlide;
 
 		TSharedPtr<PCGExPaths::FPath> Path;
 		TSharedPtr<PCGExPaths::FPathEdgeLength> PathLength;

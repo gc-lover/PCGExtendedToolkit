@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "PCGExFittingCommon.h"
+#include "PCGExFittingOverrides.h"
 #include "Data/PCGExDataCommon.h"
 #include "Details/PCGExInputShorthandsDetails.h"
 #include "Metadata/PCGAttributePropertySelector.h"
@@ -90,9 +91,6 @@ struct PCGEXCORE_API FPCGExScaleToFitDetails
 			&& ScaleToFitY == EPCGExScaleToFit::None
 			&& ScaleToFitZ == EPCGExScaleToFit::None);
 	}
-
-private:
-	static void ScaleToFitAxis(const EPCGExScaleToFit Fit, const int32 Axis, const FVector& TargetScale, const FVector& TargetSize, const FVector& CandidateSize, const FVector& MinMaxFit, FVector& OutScale);
 };
 
 USTRUCT(BlueprintType)
@@ -272,8 +270,9 @@ struct PCGEXCORE_API FPCGExFittingDetailsHandler
 
 	bool Init(FPCGExContext* InContext, const TSharedRef<PCGExData::FFacade>& InTargetFacade);
 
-	void ComputeTransform(const int32 TargetIndex, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation, const bool bWorldSpace = true) const;
-	void ComputeLocalTransform(const int32 TargetIndex, const FTransform& InLocalXForm, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation) const;
+	/** InOverrides members, when set, replace the corresponding node-level details for this computation (per-entry overrides). */
+	void ComputeTransform(const int32 TargetIndex, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation, const bool bWorldSpace = true, const PCGExFitting::FOverridesView& InOverrides = {}) const;
+	void ComputeLocalTransform(const int32 TargetIndex, const FTransform& InLocalXForm, FTransform& OutTransform, FBox& InOutBounds, FVector& OutTranslation, const PCGExFitting::FOverridesView& InOverrides = {}) const;
 
 	bool WillChangeBounds() const;
 	bool WillChangeTransform() const;
@@ -326,4 +325,28 @@ struct PCGEXCORE_API FPCGExLeanTransformDetails
 	/** Rotate result by the parent's rotation. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
 	bool bInheritRotation = true;
+
+	/** Write Source's location into OutTransform, plus rotation/scale per the inherit flags. Components that
+	 *  aren't inherited are left untouched (callers pass an identity-initialized transform). */
+	void ApplyTo(FTransform& OutTransform, const FTransform& Source) const
+	{
+		if (bInheritRotation && bInheritScale)
+		{
+			OutTransform = Source;
+		}
+		else if (bInheritRotation)
+		{
+			OutTransform.SetLocation(Source.GetLocation());
+			OutTransform.SetRotation(Source.GetRotation());
+		}
+		else if (bInheritScale)
+		{
+			OutTransform.SetLocation(Source.GetLocation());
+			OutTransform.SetScale3D(Source.GetScale3D());
+		}
+		else
+		{
+			OutTransform.SetLocation(Source.GetLocation());
+		}
+	}
 };

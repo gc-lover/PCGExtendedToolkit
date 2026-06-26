@@ -79,7 +79,8 @@ public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
 	virtual void PCGExApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS(SampleSurfaceGuided, "Sample : Line Trace", "Find the collision point on the nearest collidable surface in a given direction.");
 
@@ -90,6 +91,7 @@ public:
 #endif
 
 protected:
+	virtual FName GetMainInputPin() const override;
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
 	virtual FPCGElementPtr CreateElement() const override;
 	//~End UPCGSettings
@@ -123,13 +125,13 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExTraceSampleDistanceInput DistanceInput_DEPRECATED = EPCGExTraceSampleDistanceInput::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double MaxDistance_DEPRECATED = 1000;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector LocalMaxDistance_DEPRECATED;
 
 #pragma endregion

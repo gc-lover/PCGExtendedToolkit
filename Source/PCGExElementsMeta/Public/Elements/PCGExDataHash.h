@@ -34,7 +34,7 @@ namespace PCGExDataHash
 	const FName OutputValueLabel = FName("Value");
 }
 
-UCLASS(MinimalAPI, BlueprintType, ClassGroup = (Procedural), meta=(PCGExNodeLibraryDoc="metadata/keys/data-hash"))
+UCLASS(MinimalAPI, BlueprintType, ClassGroup = (Procedural), meta=(PCGExNodeLibraryDoc="metadata/analyze/data-hash"))
 class UPCGExDataHashSettings : public UPCGExSettings
 {
 	GENERATED_BODY()
@@ -56,6 +56,11 @@ public:
 		return PCGEX_NODE_COLOR_NAME(Constant);
 	}
 
+	virtual bool ShouldDrawNodeCompact() const override
+	{
+		return true;
+	}
+
 	FString GetEnumDisplayName() const;
 #endif
 
@@ -64,7 +69,11 @@ public:
 #endif
 
 protected:
-	virtual bool HasDynamicPins() const override { return true; }
+	virtual bool HasDynamicPins() const override
+	{
+		return true;
+	}
+
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
 	virtual TArray<FPCGPinProperties> OutputPinProperties() const override;
 	virtual FPCGElementPtr CreateElement() const override;

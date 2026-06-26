@@ -5,12 +5,14 @@
 #include "Elements/PCGExAttributeRemap.h"
 
 #include "PCGExVersion.h"
+#include "PCGExVersion.h"
+#include "Containers/PCGExScopedContainers.h"
 #include "Containers/PCGExScopedContainers.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExPointIO.h"
 #include "Data/PCGExProxyData.h"
 #include "Data/PCGExProxyDataHelpers.h"
-#include "Data/PCGExSubSelectionOps.h"
+#include "Data/PCGExSubAccessor.h"
 #include "Details/PCGExSettingsDetails.h"
 
 
@@ -28,7 +30,7 @@ FString UPCGExAttributeRemapSettings::GetDisplayName() const
 	return TEXT("Remap : ") + Attributes.Source.ToString();
 }
 
-void UPCGExAttributeRemapSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExAttributeRemapSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 70, 11)
 	{
@@ -43,7 +45,7 @@ void UPCGExAttributeRemapSettings::ApplyDeprecation(UPCGNode* InOutNode)
 		}
 	}
 
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 #endif
 
@@ -55,6 +57,13 @@ void FPCGExAttributeRemapContext::RegisterAssetDependencies()
 		AddAssetDependency(Rule.RemapDetails.RemapCurve.ToSoftObjectPath());
 	}
 }
+
+#if WITH_EDITOR
+TArray<FText> UPCGExAttributeRemapSettings::GetNodeTitleAliases() const
+{
+	return {FTEXT("PCGEx | Curve Remap")};
+}
+#endif
 
 PCGEX_INITIALIZE_ELEMENT(AttributeRemap)
 
@@ -165,9 +174,24 @@ namespace PCGExAttributeRemap
 			return false;
 		}
 
+		// Attribute Remap is a per-field numeric operation (clamp + remap arithmetic).
+		// It has no meaning on extended-type scalars (Struct, Object, Class, Soft*,
+		// Byte, Text, Enum) or container attributes (TArray/TSet/TMap). Reject those
+		// here -- previously this was caught (incidentally) by TryGetType returning
+		// Unknown and failing Capture; that's no longer true, so the guard is now
+		// explicit.
+		{
+			const bool bIsContainer = InputDescriptor.SourceDesc.IsValid() && !InputDescriptor.SourceDesc.IsSingleValue();
+			if (bIsContainer || !PCGExMetaHelpers::IsLegacyScalarType(InputDescriptor.RealType))
+			{
+				PCGE_LOG_C(Error, GraphAndLog, Context, FTEXT("Attribute Remap requires a numeric scalar attribute. Struct, Object, container, and other extended types are not supported."));
+				return false;
+			}
+		}
+
 		// Number of dimensions to be remapped
 		UnderlyingType = InputDescriptor.WorkingType;
-		Dimensions = FMath::Min(4, PCGExData::FSubSelectorRegistry::Get(UnderlyingType)->GetNumFields());
+		Dimensions = FMath::Min(4, PCGExData::GetNumFieldsForType(UnderlyingType));
 
 		// Get per-field proxies for input
 		if (!GetPerFieldProxyBuffers(Context, InputDescriptor, Dimensions, UntypedInputProxies))
@@ -179,7 +203,7 @@ namespace PCGExAttributeRemap
 		{
 			// This might be expected if the destination does not exist
 
-			if (Dimensions == 1 && Settings->Attributes.WantsRemappedOutput() && !OutputDescriptor.SubSelection.bIsValid)
+			if (Dimensions == 1 && Settings->Attributes.WantsRemappedOutput() && !OutputDescriptor.SubSelection.HasSelection())
 			{
 				// We're remapping a component to a single value with no subselection
 				OutputDescriptor.RealType = InputDescriptor.WorkingType;

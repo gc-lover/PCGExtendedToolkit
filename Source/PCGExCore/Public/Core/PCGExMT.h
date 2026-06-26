@@ -47,6 +47,44 @@ namespace PCGExMT
 	class FTaskGroup;
 	class FTaskManager;
 
+	// Counts async tasks currently pinning the owning context. Lives in its own shared object (not on
+	// the context) so the cancel finalizer can poll it WITHOUT pinning the context, and thus learn
+	// when every worker has let go -- so the final delete can run on the game thread, not off-thread.
+	class PCGEXCORE_API FAsyncContextPinTracker : public TSharedFromThis<FAsyncContextPinTracker>
+	{
+		std::atomic<int32> PinCount{0};
+
+	public:
+		void Increment() { PinCount.fetch_add(1, std::memory_order_acq_rel); }
+		void Decrement() { PinCount.fetch_sub(1, std::memory_order_acq_rel); }
+		int32 Num() const { return PinCount.load(std::memory_order_acquire); }
+	};
+
+	// RAII bracket for the context-pinned region of an async task body. MUST be the task body's FIRST
+	// action -- before any cancellation gate and before the FSharedContext pin (so it destructs after
+	// that pin releases). That ordering lets a zero tracker count mean "no task holds or can still
+	// acquire a pin": a task that may pin is already counted, and one starting after a cancel
+	// increments then bails at its gate without pinning. Every independently-scheduled off-thread task
+	// that pins MUST use this; sub-tasks pinning under a synchronous join are covered by the parent.
+	struct FAsyncContextPinScope
+	{
+		TSharedPtr<FAsyncContextPinTracker> Tracker;
+
+		explicit FAsyncContextPinScope(const TSharedPtr<FAsyncContextPinTracker>& InTracker)
+			: Tracker(InTracker)
+		{
+			if (Tracker) { Tracker->Increment(); }
+		}
+
+		~FAsyncContextPinScope()
+		{
+			if (Tracker) { Tracker->Decrement(); }
+		}
+
+		FAsyncContextPinScope(const FAsyncContextPinScope&) = delete;
+		FAsyncContextPinScope& operator=(const FAsyncContextPinScope&) = delete;
+	};
+
 	// Base async handle with state management
 	class PCGEXCORE_API IAsyncHandle : public TSharedFromThis<IAsyncHandle>
 	{
@@ -339,6 +377,18 @@ namespace PCGExMT
 
 	PCGEXCORE_API
 	void ExecuteOnMainThreadAndWait(FExecuteCallback&& Callback);
+
+	// True when UObject work (spawning actors, NewObject, FindFunction) is currently illegal -- a package save or GC
+	// is in progress. Game-thread output phases that marshal object work must defer (re-tick) until this is false.
+	// See the PCGEX_DEFER_IF_OBJECT_WORK_BLOCKED macro.
+	PCGEXCORE_API
+	bool IsObjectWorkBlocked();
+
+// Defer the current bool-returning AdvanceWork (return false = "not complete, re-tick") when UObject work is illegal
+// -- a package save / GC is in progress. USE ONLY in a main-thread-only element (PCGEX_CAN_ONLY_EXECUTE_ON_MAIN_THREAD):
+// on an off-thread/paused context this return-false is never re-driven and would hang. The game-thread UObject work
+// itself (spawn / marshal / FindFunction) must still carry its own PCGExMT::IsObjectWorkBlocked() backstop.
+#define PCGEX_DEFER_IF_OBJECT_WORK_BLOCKED if (PCGExMT::IsObjectWorkBlocked()) { return false; }
 
 	// Base task class
 	class PCGEXCORE_API FTask : public IAsyncHandle

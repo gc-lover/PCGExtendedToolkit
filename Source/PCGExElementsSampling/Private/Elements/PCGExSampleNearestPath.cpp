@@ -6,6 +6,7 @@
 #include "Blenders/PCGExUnionOpsManager.h"
 #include "Containers/PCGExScopedContainers.h"
 #include "Core/PCGExBlendOpsManager.h"
+#include "Core/PCGExBlendOpsSchema.h"
 #include "Core/PCGExOpStats.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExDataTags.h"
@@ -63,7 +64,13 @@ void UPCGExSampleNearestPathSettings::PCGExApplyDeprecationBeforeUpdatePins(UPCG
 	Super::PCGExApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
 }
 
-void UPCGExSampleNearestPathSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExSampleNearestPathSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+
+void UPCGExSampleNearestPathSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 74, 3)
 	{
@@ -71,9 +78,14 @@ void UPCGExSampleNearestPathSettings::ApplyDeprecation(UPCGNode* InOutNode)
 		MinRange.Update(RangeMinInput_DEPRECATED, RangeMinAttribute_DEPRECATED, RangeMin_DEPRECATED);
 		MaxRange.Update(RangeMaxInput_DEPRECATED, RangeMaxAttribute_DEPRECATED, RangeMax_DEPRECATED);
 	}
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 #endif
+
+FName UPCGExSampleNearestPathSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
+}
 
 TArray<FPCGPinProperties> UPCGExSampleNearestPathSettings::InputPinProperties() const
 {
@@ -190,9 +202,18 @@ bool FPCGExSampleNearestPathElement::Boot(FPCGExContext* InContext) const
 
 	if (!Context->BlendingFactories.IsEmpty())
 	{
+		// Resolve blend op configs once, here, single-threaded: per-processor blender init then
+		// only instantiates ops (no concurrent metadata enumeration on shared target facades),
+		// and the preloader warms exactly the attribute set the ops will read.
+		Context->BlendOpsSchema = MakeShared<PCGExBlending::FBlendOpsSchema>();
+		if (!Context->BlendOpsSchema->Init(Context, Context->BlendingFactories, Context->TargetsHandler->GetFacades()))
+		{
+			return false;
+		}
+
 		Context->TargetsHandler->ForEachPreloader([&](PCGExData::FFacadePreloader& Preloader)
 		{
-			PCGExBlending::RegisterBuffersDependencies_SourceA(Context, Preloader, Context->BlendingFactories);
+			Context->BlendOpsSchema->RegisterBuffersDependencies(Context, Preloader);
 		});
 	}
 
@@ -217,7 +238,7 @@ bool FPCGExSampleNearestPathElement::AdvanceWork(FPCGExContext* InContext, const
 	{
 		Context->SetState(PCGExCommon::States::State_FacadePreloading);
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetOrCreateHandle();
+		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetWeakSelfHandle();
 		Context->TargetsHandler->TargetsPreloader->OnCompleteCallback = [Settings, Context, WeakHandle]()
 		{
 			PCGEX_SHARED_CONTEXT_VOID(WeakHandle)
@@ -344,7 +365,7 @@ namespace PCGExSampleNearestPath
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(InitBlendingFactories)
 			UnionBlendOpsManager = MakeShared<PCGExBlending::FUnionOpsManager>(&Context->BlendingFactories, Context->TargetsHandler->GetDistances());
-			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetsHandler->GetFacades()))
+			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetsHandler->GetFacades(), Context->BlendOpsSchema))
 			{
 				return false;
 			}

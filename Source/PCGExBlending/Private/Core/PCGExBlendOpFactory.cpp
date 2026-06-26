@@ -155,7 +155,7 @@ bool FPCGExBlendOperation::PrepareForData(FPCGExContext* InContext)
 	{
 		if (const FPCGMetadataAttributeBase* OutAttribute = TargetFacade->GetOut()->Metadata->GetConstAttribute(PCGExMetaHelpers::GetAttributeIdentifier(Config.OutputTo, TargetFacade->GetOut())))
 		{
-			RealTypeC = static_cast<EPCGMetadataTypes>(OutAttribute->GetTypeId());
+			RealTypeC = PCGExMetaHelpers::GetAttributeType(OutAttribute);
 
 			if ((Config.OutputType == EPCGExOperandAuthority::A && RealTypeC != A.RealType)
 				|| (Config.OutputType == EPCGExOperandAuthority::B && RealTypeC != B.RealType)
@@ -183,14 +183,14 @@ bool FPCGExBlendOperation::PrepareForData(FPCGExContext* InContext)
 				if (OutAttribute)
 				{
 					// First, check for an existing attribute
-					RealTypeC = static_cast<EPCGMetadataTypes>(OutAttribute->GetTypeId());
+					RealTypeC = PCGExMetaHelpers::GetAttributeType(OutAttribute);
 					// TODO : Account for possible desired cast to a different type in the blend stack
 				}
 
-				if (OutputSubselection.bIsValid && RealTypeC == EPCGMetadataTypes::Unknown)
+				if (OutputSubselection.HasSelection() && RealTypeC == EPCGMetadataTypes::Unknown)
 				{
 					// Take a wild guess based on subselection, if any
-					RealTypeC = OutputSubselection.PossibleSourceType;
+					RealTypeC = OutputSubselection.GetHintedSourceType();
 				}
 
 				if (RealTypeC == EPCGMetadataTypes::Unknown)
@@ -198,8 +198,8 @@ bool FPCGExBlendOperation::PrepareForData(FPCGExContext* InContext)
 					// Ok we really have little to work with,
 					// take a guess based on other attribute types and pick the broader type
 
-					EPCGMetadataTypes TypeA = A.SubSelection.bIsValid && A.SubSelection.bIsFieldSet ? EPCGMetadataTypes::Double : A.RealType;
-					EPCGMetadataTypes TypeB = B.SubSelection.bIsValid && B.SubSelection.bIsFieldSet ? EPCGMetadataTypes::Double : B.RealType;
+					EPCGMetadataTypes TypeA = A.SubSelection.IsFieldSelection() ? EPCGMetadataTypes::Double : A.RealType;
+					EPCGMetadataTypes TypeB = B.SubSelection.IsFieldSelection() ? EPCGMetadataTypes::Double : B.RealType;
 
 					auto GetMetadataRating = [](const EPCGMetadataTypes InType)
 					{
@@ -241,6 +241,13 @@ bool FPCGExBlendOperation::PrepareForData(FPCGExContext* InContext)
 	}
 	else // Point property
 	{
+		// Derived properties ($LocalCenter, $LocalSize, $ScaledLocalSize) resolve to NAME_None: PCG
+		// can't write them, so reject them here.
+		if (UPCGExBlendOpFactory::GetOutputTargetName(Config).IsNone())
+		{
+			PCGE_LOG_C(Error, GraphAndLog, InContext, FTEXT("This point property is not a supported blend output (PCG does not allow writing it). Blend its underlying components instead (e.g. $BoundsMin/$BoundsMax, $Scale)."));
+			return false;
+		}
 		RealTypeC = PCGExMetaHelpers::GetPropertyType(Config.OutputTo.GetPointProperty());
 	}
 
@@ -257,6 +264,72 @@ bool FPCGExBlendOperation::PrepareForData(FPCGExContext* InContext)
 
 	C.RealType = RealTypeC;
 	C.WorkingType = WorkingTypeC;
+
+	// Property-backed participation gate. Extended-type scalars (Struct/Object/Class/
+	// Soft*/Byte/Text/Enum) and containers (TArray/TSet/TMap) have no FPCGMetadataAttribute<T>
+	// and no field-wise conversion table -- only memcpy / CopyCompleteValue. Restrict to
+	// Copy modes, reject subselection and cross-type conversion, and propagate the source
+	// template Desc onto C (constructed manually, so GetProxyBuffer's write fallback can
+	// create the output attribute for Output Mode: New).
+	{
+		auto IsPropertyBacked = [](const PCGExData::FProxyDescriptor& D) -> bool
+		{
+			if (!PCGExMetaHelpers::IsLegacyScalarType(D.RealType))
+			{
+				return true;
+			}
+			if (D.SourceDesc.IsValid() && !D.SourceDesc.IsSingleValue())
+			{
+				return true;
+			}
+			return false;
+		};
+
+		const bool bAIsPropertyBacked = IsPropertyBacked(A);
+		const bool bBIsPropertyBacked = !bSkipSourceB && IsPropertyBacked(B);
+		const bool bCIsPropertyBacked = !PCGExMetaHelpers::IsLegacyScalarType(RealTypeC);
+
+		if (bAIsPropertyBacked || bBIsPropertyBacked || bCIsPropertyBacked)
+		{
+			const bool bIsCopyOp =
+				Config.BlendMode == EPCGExABBlendingType::CopySource ||
+				Config.BlendMode == EPCGExABBlendingType::CopyTarget ||
+				Config.BlendMode == EPCGExABBlendingType::None;
+
+			if (!bIsCopyOp)
+			{
+				PCGE_LOG_C(Error, GraphAndLog, InContext, FTEXT("Only Copy blend modes are supported on extended-type / container attributes (Struct, Object, Soft*, Byte, Text, Enum, TArray/TSet/TMap)."));
+				return false;
+			}
+
+			if (A.SubSelection.HasSelection() ||
+				(!bSkipSourceB && B.SubSelection.HasSelection()) ||
+				C.SubSelection.HasSelection())
+			{
+				PCGE_LOG_C(Error, GraphAndLog, InContext, FTEXT("Subselection (e.g. .X, .Yaw) is not supported on extended-type / container attributes."));
+				return false;
+			}
+
+			const bool bMatchesA = (RealTypeC == A.RealType);
+			const bool bMatchesB = !bSkipSourceB && (RealTypeC == B.RealType);
+			if (!bMatchesA && !bMatchesB)
+			{
+				PCGE_LOG_C(Error, GraphAndLog, InContext, FTEXT("Cannot convert between extended-type / container attributes and other types via blend ops. Output type must match the source type exactly."));
+				return false;
+			}
+
+			// Propagate template Desc from whichever source matches RealTypeC,
+			// so GetProxyBuffer can create the output attribute on a fresh write.
+			if (!C.SourceDesc.IsValid())
+			{
+				const PCGExData::FProxyDescriptor& Template = bMatchesA ? A : B;
+				if (Template.SourceDesc.IsValid())
+				{
+					C.SourceDesc = Template.SourceDesc;
+				}
+			}
+		}
+	}
 
 	if (bSkipSourceB)
 	{
@@ -410,6 +483,16 @@ TSharedPtr<FPCGExBlendOperation> UPCGExBlendOpFactory::CreateOperation(FPCGExCon
 	return NewOperation;
 }
 
+bool UPCGExBlendOpFactory::ResolveConfigs(
+	FPCGExContext* InContext,
+	const TSharedPtr<PCGExData::FFacade>& InSourceAFacade,
+	TArray<FPCGExAttributeBlendConfig>& OutConfigs,
+	const TSet<FName>* InSupersedeNames) const
+{
+	OutConfigs.Add(Config);
+	return true;
+}
+
 bool UPCGExBlendOpFactory::CreateOperations(
 	FPCGExContext* InContext,
 	const TSharedPtr<PCGExData::FFacade>& InSourceAFacade,
@@ -417,12 +500,23 @@ bool UPCGExBlendOpFactory::CreateOperations(
 	TArray<TSharedPtr<FPCGExBlendOperation>>& OutOperations,
 	const TSet<FName>* InSupersedeNames) const
 {
-	TSharedPtr<FPCGExBlendOperation> Op = CreateOperation(InContext);
-	if (!Op)
+	TArray<FPCGExAttributeBlendConfig> Configs;
+	if (!ResolveConfigs(InContext, InSourceAFacade, Configs, InSupersedeNames))
 	{
 		return false;
 	}
-	OutOperations.Add(Op);
+
+	OutOperations.Reserve(OutOperations.Num() + Configs.Num());
+	for (FPCGExAttributeBlendConfig& ResolvedConfig : Configs)
+	{
+		TSharedPtr<FPCGExBlendOperation> Op = CreateOperation(InContext);
+		if (!Op)
+		{
+			return false;
+		}
+		Op->Config = MoveTemp(ResolvedConfig);
+		OutOperations.Add(Op);
+	}
 	return true;
 }
 
@@ -459,6 +553,10 @@ FName UPCGExBlendOpFactory::GetOutputTargetName(const FPCGExAttributeBlendConfig
 #define PCGEX_MAP_PP(_NAME, ...) case EPCGPointProperties::_NAME: return FName(TEXT("$" #_NAME));
 		PCGEX_FOREACH_BLEND_POINTPROPERTY(PCGEX_MAP_PP)
 #undef PCGEX_MAP_PP
+		// Composite outputs (not part of the blend macro). $LocalCenter/$LocalSize/$ScaledLocalSize are
+		// intentionally absent -- PCG can't write them, so they fall through to NAME_None.
+		case EPCGPointProperties::Transform: return FName(TEXT("$Transform"));
+		case EPCGPointProperties::Extents: return FName(TEXT("$Extents"));
 		default:
 			return NAME_None;
 		}
@@ -502,12 +600,12 @@ PCGExFactories::EPreparationResult UPCGExBlendOpFactory::Prepare(FPCGExContext* 
 	return Result;
 }
 
-void UPCGExBlendOpFactory::RegisterAssetDependencies(FPCGExContext* InContext) const
+void UPCGExBlendOpFactory::RegisterAssetDependencies(TSet<FSoftObjectPath>& InDependencies) const
 {
-	Super::RegisterAssetDependencies(InContext);
+	Super::RegisterAssetDependencies(InDependencies);
 	if (!Config.Weighting.bUseLocalCurve)
 	{
-		InContext->AddAssetDependency(Config.Weighting.WeightCurve.ToSoftObjectPath());
+		InDependencies.Add(Config.Weighting.WeightCurve.ToSoftObjectPath());
 	}
 }
 

@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Core/PCGExAssetCollection.h"
+#include "Core/PCGExStagingBoundsModifier.h"
 
 #include "PCGExLog.h"
 #include "PCGExProperty.h"
@@ -22,7 +23,9 @@
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/FileManager.h"
+#include "Helpers/PCGExCollectionStagingPipeline.h"
 #include "Misc/PackageName.h"
+#include "UObject/Script.h"
 #endif
 
 bool FPCGExEntryAccessResult::IsType(PCGExAssetCollection::FTypeId TypeId) const
@@ -268,6 +271,20 @@ namespace PCGExAssetCollection
 	// index in CategoryNameToIndex). Subsequent entries on the same name reuse that slot.
 	void FCache::RegisterEntry(int32 Index, const FPCGExAssetCollectionEntry* InEntry)
 	{
+		check(InEntry);
+
+		FPCGExAssetCollectionEntry* MutableEntry = const_cast<FPCGExAssetCollectionEntry*>(InEntry);
+		FPCGExAssetStagingData& Staging = MutableEntry->Staging;
+
+		if (const FPCGExStagingBoundsModifier* Modifier = Staging.BoundsStagingModifier.GetPtr<FPCGExStagingBoundsModifier>())
+		{
+			Staging.AlteredBounds = Modifier->ComputeAlteredBounds(Staging.Bounds);
+		}
+		else
+		{
+			Staging.AlteredBounds = Staging.Bounds;
+		}
+
 		Main->RegisterEntry(Index, InEntry);
 		if (const int32* IdxPtr = CategoryNameToIndex.Find(InEntry->Category))
 		{
@@ -322,7 +339,53 @@ const FPCGExFittingVariations& FPCGExAssetCollectionEntry::GetVariations(const U
 	{
 		return ParentCollection->GlobalVariations;
 	}
+
+	if (VariationMode == EPCGExEntryVariationMode::None)
+	{
+		// Identity ranges, NOT a skip: Apply() must keep drawing from the random stream exactly
+		// as a Local entry with default values would, so seed-dependent downstream results are
+		// unaffected by the None/Local distinction.
+		static const FPCGExFittingVariations IdentityVariations;
+		return IdentityVariations;
+	}
+
 	return Variations;
+}
+
+const FPCGExLeanScaleToFitDetails* FPCGExAssetCollectionEntry::GetScaleToFitOverride(const UPCGExAssetCollection* ParentCollection) const
+{
+	if (ParentCollection && ParentCollection->GlobalScaleToFitMode == EPCGExGlobalVariationRule::Overrule)
+	{
+		return &ParentCollection->GlobalScaleToFit;
+	}
+
+	switch (ScaleToFitSource)
+	{
+	case EPCGExEntryVariationMode::Local:
+		return &ScaleToFit;
+	case EPCGExEntryVariationMode::Global:
+		return ParentCollection ? &ParentCollection->GlobalScaleToFit : nullptr;
+	default:
+		return nullptr;
+	}
+}
+
+const FPCGExLeanJustificationDetails* FPCGExAssetCollectionEntry::GetJustificationOverride(const UPCGExAssetCollection* ParentCollection) const
+{
+	if (ParentCollection && ParentCollection->GlobalJustificationMode == EPCGExGlobalVariationRule::Overrule)
+	{
+		return &ParentCollection->GlobalJustification;
+	}
+
+	switch (JustificationSource)
+	{
+	case EPCGExEntryVariationMode::Local:
+		return &Justification;
+	case EPCGExEntryVariationMode::Global:
+		return ParentCollection ? &ParentCollection->GlobalJustification : nullptr;
+	default:
+		return nullptr;
+	}
 }
 
 const FPCGExAssetGrammarDetails* FPCGExAssetCollectionEntry::GetEffectiveGrammar(const UPCGExAssetCollection* Host) const
@@ -337,7 +400,10 @@ const FPCGExAssetGrammarDetails* FPCGExAssetCollectionEntry::GetEffectiveGrammar
 	}
 
 	// Subcollection: Inherit / Override / Flatten.
-	if (!InternalSubCollection) { return nullptr; }
+	if (!InternalSubCollection)
+	{
+		return nullptr;
+	}
 	switch (SubGrammarMode)
 	{
 	case EPCGExGrammarSubCollectionMode::Inherit:
@@ -354,7 +420,7 @@ double FPCGExAssetCollectionEntry::GetGrammarSize(
 	const EPCGExGrammarAxes Axis,
 	FPCGExGrammarSizeCache* SizeCache) const
 {
-	const FPCGExGrammarSizeCacheKey CacheKey{ this, Axis };
+	const FPCGExGrammarSizeCacheKey CacheKey{this, Axis};
 	if (SizeCache)
 	{
 		if (const double* CachedSize = SizeCache->Find(CacheKey))
@@ -370,7 +436,10 @@ double FPCGExAssetCollectionEntry::GetGrammarSize(
 			? Resolved->GetSubCollectionSize(InternalSubCollection, Axis, SizeCache)
 			: Resolved->GetLeafSize(Staging.Bounds, Axis));
 
-	if (SizeCache) { SizeCache->Add(CacheKey, Size); }
+	if (SizeCache)
+	{
+		SizeCache->Add(CacheKey, Size);
+	}
 	return Size;
 }
 
@@ -381,7 +450,10 @@ bool FPCGExAssetCollectionEntry::FixModuleInfos(
 	FPCGExGrammarSizeCache* SizeCache) const
 {
 	const FPCGExAssetGrammarDetails* Resolved = GetEffectiveGrammar(Host);
-	if (!Resolved) { return false; }
+	if (!Resolved)
+	{
+		return false;
+	}
 	return bIsSubCollection
 		? Resolved->FixSubCollection(InternalSubCollection, Axis, OutModule, SizeCache)
 		: Resolved->FixLeaf(Staging.Bounds, Axis, OutModule);
@@ -903,12 +975,63 @@ void UPCGExAssetCollection::PostEditImport()
 namespace PCGExAssetCollectionMigration
 {
 	static constexpr int32 CurrentGrammarSchemaVersion = 1;
+	static constexpr int32 CurrentFittingSchemaVersion = 1;
+
+	/**
+	 * Migrate one entry's variation mode from the always-on era (v0) to opt-in (v1).
+	 *
+	 * 'Local' was both the old default and the old delta-serialization baseline, so entries
+	 * authored as Local never wrote the byte to disk and now load as None (the new default).
+	 * Intent is recovered from the data itself: authored ranges mean Local, untouched ranges
+	 * mean None. Global entries always serialized their byte and are left alone (their parked
+	 * local values are kept too). Behaviorally lossless either way: GetVariations resolves
+	 * None to identity ranges, which is exactly what a Local entry with default values was.
+	 *
+	 * Returns true if the entry was modified.
+	 */
+	static bool MigrateEntryVariationsV0ToV1(FPCGExAssetCollectionEntry* Entry)
+	{
+		if (!Entry || Entry->VariationMode == EPCGExEntryVariationMode::Global)
+		{
+			return false;
+		}
+
+		static const FPCGExFittingVariations Defaults;
+		const bool bIsDefault = FPCGExFittingVariations::StaticStruct()->CompareScriptStruct(&Entry->Variations, &Defaults, 0);
+
+		const EPCGExEntryVariationMode Desired = bIsDefault ? EPCGExEntryVariationMode::None : EPCGExEntryVariationMode::Local;
+		if (Entry->VariationMode == Desired)
+		{
+			return false;
+		}
+
+		Entry->VariationMode = Desired;
+		return true;
+	}
+
+	// -- Future (option B): true sparse storage for entry variations ---------------------------
+	// v1 (above) makes variations semantically opt-in but keeps the FPCGExFittingVariations
+	// payload inline on every entry. If per-entry memory ever matters, the v2 pass is:
+	//   1. Add sparse storage (e.g. an FInstancedStruct payload populated only for Local
+	//      entries -- after v1 normalization that is exactly the entries with authored ranges).
+	//   2. Rename the inline member Variations -> Variations_DEPRECATED (UE matches the
+	//      serialized 'Variations' tag onto the _DEPRECATED member automatically) and add a
+	//      FittingSchemaVersion < 2 PostLoad pass that moves the payload, then bump to 2.
+	//   3. Fleet-resave production collections (ResavePackages commandlet) so disk data migrates.
+	//   4. Only then delete Variations_DEPRECATED in a later release: a deprecated UPROPERTY
+	//      still occupies its bytes in RAM, so the win only materializes at deletion -- which is
+	//      only safe once no un-resaved asset remains.
+	// GetVariations() is the single read funnel, so consumers won't notice the storage change.
+	// -------------------------------------------------------------------------------------------
 
 	/** Migrate one entry's grammar data from v0 to v1. Returns true if a downgrade warning
 	 *  should be emitted for this entry (legacy Min/Max/Average on a leaf). */
 	static bool MigrateEntryGrammarV0ToV1(FPCGExAssetCollectionEntry* Entry)
 	{
-		if (!Entry) { return false; }
+		if (!Entry)
+		{
+			return false;
+		}
 
 		bool bWarn = false;
 		if (Entry->bIsSubCollection && Entry->SubGrammarMode == EPCGExGrammarSubCollectionMode::Override)
@@ -933,6 +1056,16 @@ void UPCGExAssetCollection::PostLoad()
 {
 	Super::PostLoad();
 
+#if WITH_EDITORONLY_DATA
+	// Single-pipeline slot migration: the legacy StagingPipeline pointer becomes the first
+	// element of the composable StagingPipelines array. Runs once; subsequent loads no-op.
+	if (StagingPipeline_DEPRECATED)
+	{
+		StagingPipelines.Add(StagingPipeline_DEPRECATED);
+		StagingPipeline_DEPRECATED = nullptr;
+	}
+#endif
+
 #if WITH_EDITOR
 	// Grammar schema migration. Runs once per collection; subsequent loads no-op.
 	if (GrammarSchemaVersion < PCGExAssetCollectionMigration::CurrentGrammarSchemaVersion)
@@ -940,14 +1073,20 @@ void UPCGExAssetCollection::PostLoad()
 		int32 DowngradedEntries = 0;
 		int32 DisabledEntries = 0;
 
-		if (GlobalAssetGrammar.MigrateFromV0Internal()) { DowngradedEntries++; }
+		if (GlobalAssetGrammar.MigrateFromV0Internal())
+		{
+			DowngradedEntries++;
+		}
 
 		// SubCollectionGrammar is a new v1 field; its source data lives on the legacy CollectionGrammar slot.
 		SubCollectionGrammar.MigrateFromLegacyCollectionGrammar(CollectionGrammar_DEPRECATED);
 
 		ForEachEntry([&DowngradedEntries, &DisabledEntries](FPCGExAssetCollectionEntry* Entry, int32 /*Index*/)
 		{
-			if (PCGExAssetCollectionMigration::MigrateEntryGrammarV0ToV1(Entry)) { DowngradedEntries++; }
+			if (PCGExAssetCollectionMigration::MigrateEntryGrammarV0ToV1(Entry))
+			{
+				DowngradedEntries++;
+			}
 			if (Entry && !Entry->bIsSubCollection && Entry->AssetGrammar.Axes == static_cast<uint8>(EPCGExGrammarAxes::None))
 			{
 				DisabledEntries++;
@@ -957,18 +1096,33 @@ void UPCGExAssetCollection::PostLoad()
 		if (DowngradedEntries > 0)
 		{
 			UE_LOG(LogTemp, Warning,
-				TEXT("[PCGEx] Grammar migration: %d entr%s in '%s' had legacy Min/Max/Average size mode -- downgraded to X-bounds. Review and reconfigure axes if needed."),
-				DowngradedEntries, DowngradedEntries == 1 ? TEXT("y") : TEXT("ies"), *GetName());
+			       TEXT("[PCGEx] Grammar migration: %d entr%s in '%s' had legacy Min/Max/Average size mode -- downgraded to X-bounds. Review and reconfigure axes if needed."),
+			       DowngradedEntries, DowngradedEntries == 1 ? TEXT("y") : TEXT("ies"), *GetName());
 		}
 		if (DisabledEntries > 0)
 		{
 			UE_LOG(LogTemp, Log,
-				TEXT("[PCGEx] Grammar migration: %d entr%s in '%s' had empty Symbol -- grammar disabled (Axes=None)."),
-				DisabledEntries, DisabledEntries == 1 ? TEXT("y") : TEXT("ies"), *GetName());
+			       TEXT("[PCGEx] Grammar migration: %d entr%s in '%s' had empty Symbol -- grammar disabled (Axes=None)."),
+			       DisabledEntries, DisabledEntries == 1 ? TEXT("y") : TEXT("ies"), *GetName());
 		}
 
 		GrammarSchemaVersion = PCGExAssetCollectionMigration::CurrentGrammarSchemaVersion;
-		
+
+		(void)MarkPackageDirty();
+	}
+
+	// Entry variations opt-in migration (v0 -> v1). VariationMode's default flipped from Local
+	// to None; this pass recovers authored intent from the serialized data (see
+	// MigrateEntryVariationsV0ToV1). Runs once per collection; subsequent loads no-op.
+	if (FittingSchemaVersion < PCGExAssetCollectionMigration::CurrentFittingSchemaVersion)
+	{
+		ForEachEntry([](FPCGExAssetCollectionEntry* Entry, int32 /*Index*/)
+		{
+			PCGExAssetCollectionMigration::MigrateEntryVariationsV0ToV1(Entry);
+		});
+
+		FittingSchemaVersion = PCGExAssetCollectionMigration::CurrentFittingSchemaVersion;
+
 		(void)MarkPackageDirty();
 	}
 #endif
@@ -1224,28 +1378,28 @@ void UPCGExAssetCollection::RefreshCollectionPropertiesFromEntries(
 
 	ForEachEntry([&CanonicalSchema
 #if WITH_EDITOR
-				, &CanonicalHeaderIdsByName
+			, &CanonicalHeaderIdsByName
 #endif
-			](FPCGExAssetCollectionEntry* InEntry, int32 /*Idx*/)
-	{
-		if (!InEntry)
+		](FPCGExAssetCollectionEntry* InEntry, int32 /*Idx*/)
 		{
-			return;
-		}
-#if WITH_EDITOR
-		for (FPCGExPropertyOverrideEntry& Slot : InEntry->PropertyOverrides.Overrides)
-		{
-			if (FPCGExProperty* P = Slot.GetPropertyMutable())
+			if (!InEntry)
 			{
-				if (const int32* CanonicalId = CanonicalHeaderIdsByName.Find(P->PropertyName))
+				return;
+			}
+#if WITH_EDITOR
+			for (FPCGExPropertyOverrideEntry& Slot : InEntry->PropertyOverrides.Overrides)
+			{
+				if (FPCGExProperty* P = Slot.GetPropertyMutable())
 				{
-					P->HeaderId = *CanonicalId;
+					if (const int32* CanonicalId = CanonicalHeaderIdsByName.Find(P->PropertyName))
+					{
+						P->HeaderId = *CanonicalId;
+					}
 				}
 			}
-		}
 #endif
-		InEntry->PropertyOverrides.SyncToSchema(CanonicalSchema);
-	});
+			InEntry->PropertyOverrides.SyncToSchema(CanonicalSchema);
+		});
 
 	RebuildPropertyRegistry();
 }
@@ -1323,7 +1477,10 @@ void UPCGExAssetCollection::PostEditChangeProperty(FPropertyChangedEvent& Proper
 		SubCollectionGrammar.ValidateContext(/*bIsSubCollection=*/true);
 		ForEachEntry([](FPCGExAssetCollectionEntry* Entry, int32 /*Index*/)
 		{
-			if (Entry) { Entry->AssetGrammar.ValidateContext(Entry->bIsSubCollection); }
+			if (Entry)
+			{
+				Entry->AssetGrammar.ValidateContext(Entry->bIsSubCollection);
+			}
 		});
 	}
 
@@ -1372,17 +1529,112 @@ void UPCGExAssetCollection::SyncPropertyOverridesToEntries()
 	});
 }
 
+bool UPCGExAssetCollection::EDITOR_HasAnyStagingPipeline() const
+{
+	for (const TObjectPtr<UPCGExCollectionStagingPipeline>& Pipeline : StagingPipelines)
+	{
+		if (Pipeline)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UPCGExAssetCollection::EDITOR_DispatchPipelinePreRebuild()
+{
+	if (bEDITOR_PipelineDispatchGuard || IsRunningCookCommandlet() || !EDITOR_HasAnyStagingPipeline())
+	{
+		return;
+	}
+
+	// Hooks may mutate entries before some session paths take their own snapshot (the
+	// stale-entry batch only Modifies per entry, inside EDITOR_RebuildEntryStaging) --
+	// snapshot for undo up front. Redundant Modify calls within one transaction are no-ops.
+	Modify(true);
+
+	TGuardValue<bool> DispatchGuard(bEDITOR_PipelineDispatchGuard, true);
+	FEditorScriptExecutionGuard ScriptGuard;
+
+	for (UPCGExCollectionStagingPipeline* Pipeline : StagingPipelines)
+	{
+		if (!Pipeline)
+		{
+			continue;
+		}
+		TGuardValue<TObjectPtr<UPCGExAssetCollection>> TargetCollectionGuard(Pipeline->TargetCollection, this);
+		TGuardValue<int32> TargetIndexGuard(Pipeline->TargetEntryIndex, INDEX_NONE);
+		Pipeline->OnPreRebuild(this);
+	}
+}
+
+void UPCGExAssetCollection::EDITOR_DispatchPipelineEntry(int32 EntryIndex, bool bIsSubCollection)
+{
+	if (bEDITOR_PipelineDispatchGuard || IsRunningCookCommandlet() || !EDITOR_HasAnyStagingPipeline())
+	{
+		return;
+	}
+
+	TGuardValue<bool> DispatchGuard(bEDITOR_PipelineDispatchGuard, true);
+	FEditorScriptExecutionGuard ScriptGuard;
+
+	for (UPCGExCollectionStagingPipeline* Pipeline : StagingPipelines)
+	{
+		if (!Pipeline)
+		{
+			continue;
+		}
+		TGuardValue<TObjectPtr<UPCGExAssetCollection>> TargetCollectionGuard(Pipeline->TargetCollection, this);
+		TGuardValue<int32> TargetIndexGuard(Pipeline->TargetEntryIndex, EntryIndex);
+		Pipeline->OnProcessEntry(this, EntryIndex, bIsSubCollection);
+	}
+}
+
+void UPCGExAssetCollection::EDITOR_DispatchPipelinePostRebuild()
+{
+	if (bEDITOR_PipelineDispatchGuard || IsRunningCookCommandlet() || !EDITOR_HasAnyStagingPipeline())
+	{
+		return;
+	}
+
+	TGuardValue<bool> DispatchGuard(bEDITOR_PipelineDispatchGuard, true);
+	FEditorScriptExecutionGuard ScriptGuard;
+
+	for (UPCGExCollectionStagingPipeline* Pipeline : StagingPipelines)
+	{
+		if (!Pipeline)
+		{
+			continue;
+		}
+		TGuardValue<TObjectPtr<UPCGExAssetCollection>> TargetCollectionGuard(Pipeline->TargetCollection, this);
+		TGuardValue<int32> TargetIndexGuard(Pipeline->TargetEntryIndex, INDEX_NONE);
+		Pipeline->OnPostRebuild(this);
+	}
+}
+
+void UPCGExAssetCollection::EDITOR_FinalizeStagingRebuild()
+{
+	// Native extension point first (actor component schema merges, shared-collection
+	// compaction), then the pipeline so its OnPostRebuild operates on final state.
+	EDITOR_OnPostStagingRebuild();
+	EDITOR_DispatchPipelinePostRebuild();
+}
+
 void UPCGExAssetCollection::EDITOR_RebuildStagingData()
 {
 	Modify(true);
 	InvalidateCache();
+	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
+	{
+		EDITOR_DispatchPipelinePreRebuild();
+	}
 	EDITOR_SanitizeAndRebuildStagingData(false);
 	LastRebuiltUtc = FDateTime::UtcNow();
 	(void)MarkPackageDirty();
 	PCGExEditor::NotifyObjectChanged(this);
 	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
 	{
-		EDITOR_OnPostStagingRebuild();
+		EDITOR_FinalizeStagingRebuild();
 	}
 }
 
@@ -1390,13 +1642,17 @@ void UPCGExAssetCollection::EDITOR_RebuildStagingData_Recursive()
 {
 	Modify(true);
 	InvalidateCache();
+	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
+	{
+		EDITOR_DispatchPipelinePreRebuild();
+	}
 	EDITOR_SanitizeAndRebuildStagingData(true);
 	LastRebuiltUtc = FDateTime::UtcNow();
 	(void)MarkPackageDirty();
 	PCGExEditor::NotifyObjectChanged(this);
 	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
 	{
-		EDITOR_OnPostStagingRebuild();
+		EDITOR_FinalizeStagingRebuild();
 	}
 }
 
@@ -1421,7 +1677,6 @@ int32 UPCGExAssetCollection::EDITOR_RebuildStaleEntries()
 		{
 			return;
 		}
-
 		// Use EDITOR_GetSourceAssetPaths so entry types that bake into an embedded asset
 		// (e.g. PCGDataAsset collection entries with Source==Level) check the real source
 		// file rather than Staging.Path, which resolves to the collection's own package.
@@ -1458,6 +1713,11 @@ int32 UPCGExAssetCollection::EDITOR_RebuildStaleEntries()
 		}
 	});
 
+	if (!StaleIndices.IsEmpty())
+	{
+		EDITOR_DispatchPipelinePreRebuild();
+	}
+
 	{
 		// Suppress per-entry post-rebuild hook firings; emit one tail call after the batch.
 		TGuardValue<int32> SuppressGuard(EDITOR_PostStagingRebuildSuppressDepth, EDITOR_PostStagingRebuildSuppressDepth + 1);
@@ -1468,7 +1728,7 @@ int32 UPCGExAssetCollection::EDITOR_RebuildStaleEntries()
 	}
 	if (!StaleIndices.IsEmpty())
 	{
-		EDITOR_OnPostStagingRebuild();
+		EDITOR_FinalizeStagingRebuild();
 	}
 	return StaleIndices.Num();
 }
@@ -1478,6 +1738,25 @@ bool UPCGExAssetCollection::EDITOR_RebuildEntryStaging(int32 EntryIndex)
 	if (bSuppressStagingRebuild)
 	{
 		return false;
+	}
+
+	if (!IsValidIndex(EntryIndex))
+	{
+		return false;
+	}
+
+	// Hook-initiated restages (e.g. Blueprint RestageEntry called from a StagingPipeline hook)
+	// must be finalize-quiet: the owning session fires EDITOR_FinalizeStagingRebuild once at
+	// its own tail. Standalone calls keep full session semantics (pre-dispatch + finalize).
+	TGuardValue<int32> HookSuppressGuard(
+		EDITOR_PostStagingRebuildSuppressDepth,
+		EDITOR_PostStagingRebuildSuppressDepth + (bEDITOR_PipelineDispatchGuard ? 1 : 0));
+
+	// Direct single-entry sessions fire the pre hook themselves; batch loops (stale entries)
+	// already fired it before suppressing.
+	if (EDITOR_PostStagingRebuildSuppressDepth == 0)
+	{
+		EDITOR_DispatchPipelinePreRebuild();
 	}
 
 	bool bRebuilt = false;
@@ -1491,6 +1770,7 @@ bool UPCGExAssetCollection::EDITOR_RebuildEntryStaging(int32 EntryIndex)
 		InEntry->EDITOR_Sanitize();
 		InEntry->UpdateStaging(this, i, false);
 		InEntry->PostUpdateStaging();
+		EDITOR_DispatchPipelineEntry(i, InEntry->bIsSubCollection);
 		bRebuilt = true;
 	});
 
@@ -1501,7 +1781,7 @@ bool UPCGExAssetCollection::EDITOR_RebuildEntryStaging(int32 EntryIndex)
 		PCGExEditor::NotifyObjectChanged(this);
 		if (EDITOR_PostStagingRebuildSuppressDepth == 0)
 		{
-			EDITOR_OnPostStagingRebuild();
+			EDITOR_FinalizeStagingRebuild();
 		}
 	}
 	return bRebuilt;
@@ -1535,6 +1815,7 @@ void UPCGExAssetCollection::EDITOR_SanitizeAndRebuildStagingData(bool bRecursive
 		InEntry->EDITOR_Sanitize();
 		InEntry->UpdateStaging(this, i, bRecursive);
 		InEntry->PostUpdateStaging();
+		EDITOR_DispatchPipelineEntry(i, InEntry->bIsSubCollection);
 	});
 }
 

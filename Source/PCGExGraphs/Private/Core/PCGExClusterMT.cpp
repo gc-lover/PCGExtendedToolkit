@@ -674,11 +674,13 @@ namespace PCGExClusterMT
 			PCGExArrayHelpers::InitArray(ReverseLookup, NumVtx);
 			PCGExArrayHelpers::InitArray(ExpectedAdjacency, NumVtx);
 
-			RawLookupAttribute = PCGExMetaHelpers::TryGetConstAttribute<int64>(VtxDataFacade->GetIn(), PCGExClusters::Labels::Attr_PCGExVtxIdx);
-			if (!RawLookupAttribute)
+			const FPCGMetadataAttributeBase* RawLookupAttributeBase = PCGExMetaHelpers::TryGetConstAttribute<int64>(VtxDataFacade->GetIn(), PCGExClusters::Labels::Attr_PCGExVtxIdx);
+			if (!RawLookupAttributeBase)
 			{
 				return;
 			} // FAIL
+
+			RawLookupAttribute = static_cast<const FPCGMetadataAttribute<int64>*>(RawLookupAttributeBase);
 
 			BuildEndpointLookupTask->OnCompleteCallback = [PCGEX_ASYNC_THIS_CAPTURE]()
 			{
@@ -836,7 +838,7 @@ namespace PCGExClusterMT
 
 				NewProcessor->bIsTrivial = IO->GetNum() < PCGEX_CORE_SETTINGS.SmallClusterSize;
 				Candidates[i] = NewProcessor;
-			}, 1);
+			}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 
 		{
 			Processors.Reserve(Candidates.Num());
@@ -879,7 +881,7 @@ namespace PCGExClusterMT
 				{
 					const TSharedRef<IProcessor>& Processor = Processors[i];
 					Processor->bIsProcessorValid = Processor->Process(TaskManager);
-				}, 1);
+				}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 		}
 
 		OnInitialPostProcess();
@@ -938,7 +940,7 @@ namespace PCGExClusterMT
 					{
 						Processor->CompleteWork();
 					}
-				}, 1);
+				}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 		}
 	}
 
@@ -972,7 +974,7 @@ namespace PCGExClusterMT
 					{
 						Processor->Write();
 					}
-				}, 1);
+				}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 		}
 
 		if (bWriteVtxDataFacade && bIsBatchValid)

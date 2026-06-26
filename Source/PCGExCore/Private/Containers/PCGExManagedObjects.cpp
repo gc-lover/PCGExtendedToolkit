@@ -27,9 +27,9 @@ namespace PCGEx
 		}
 	}
 
-	FManagedObjects::FManagedObjects(FPCGContext* InContext, const TWeakPtr<FWorkHandle>& InWorkHandle)
+	FManagedObjects::FManagedObjects(const TWeakPtr<FPCGContextHandle>& InContextHandle, const TWeakPtr<FWorkHandle>& InWorkHandle)
 		: WorkHandle(InWorkHandle)
-		  , WeakHandle(InContext->GetOrCreateHandle())
+		  , WeakHandle(InContextHandle)
 	{
 	}
 
@@ -209,7 +209,7 @@ namespace PCGEx
 					return;
 				}
 				SubObject->ClearInternalFlags(EInternalObjectFlags::Async);
-			}, true);
+			}, EGetObjectsFlags::IncludeNestedObjects);
 		}
 	}
 }

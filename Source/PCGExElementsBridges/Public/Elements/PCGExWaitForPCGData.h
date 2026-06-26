@@ -57,6 +57,8 @@ namespace PCGExWaitForPCGData
 	/** Generation trigger action configuration -- alias to shared type in PCGExPCGInterop */
 	struct FGenerationConfig : PCGExPCGInterop::FGenerationConfig
 	{
+		bool bTrackSourceComponents = false;
+
 		void InitFrom(const UPCGExWaitForPCGDataSettings* Settings);
 	};
 
@@ -100,6 +102,8 @@ public:
 
 	//~Begin UPCGSettings
 #if WITH_EDITOR
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
+
 	PCGEX_NODE_INFOS(WaitForPCGData, "Wait for PCG Data", "Wait for PCG Components Generated output.");
 
 	virtual EPCGSettingsType GetType() const override
@@ -197,6 +201,10 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Gen & Wait Settings", meta = (PCG_Overridable, DisplayName="Grab GenerateAtRuntime"))
 	EPCGExRuntimeGenerationTriggerAction GenerateAtRuntime = EPCGExRuntimeGenerationTriggerAction::AsIs;
 
+	/** If enabled, registers an editor-only dependency on each fetched component's owning actor, so this node re-runs when that source component regenerates. Off by default. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Gen & Wait Settings")
+	bool bTrackSourceComponents = false;
+
 	/** If enabled, available data will be output even if some required pins have no data. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output", meta = (PCG_Overridable))
 	bool bIgnoreRequiredPin = false;
@@ -239,7 +247,7 @@ public:
 #endif
 
 	UPROPERTY()
-	TArray<FPCGPinProperties> CachedTargetPins;
+	TArray<FPCGPinProperties> CachedPinsEx;
 };
 
 struct FPCGExWaitForPCGDataContext final : FPCGExPointsProcessorContext

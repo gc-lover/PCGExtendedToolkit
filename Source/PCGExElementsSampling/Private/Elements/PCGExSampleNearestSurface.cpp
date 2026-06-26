@@ -32,7 +32,13 @@ void UPCGExSampleNearestSurfaceSettings::PCGExApplyDeprecationBeforeUpdatePins(U
 	Super::PCGExApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
 }
 
-void UPCGExSampleNearestSurfaceSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExSampleNearestSurfaceSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+
+void UPCGExSampleNearestSurfaceSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 74, 3)
 	{
@@ -40,10 +46,15 @@ void UPCGExSampleNearestSurfaceSettings::ApplyDeprecation(UPCGNode* InOutNode)
 		Distance.Update(bUseLocalMaxDistance_DEPRECATED ? EPCGExInputValueType::Attribute : EPCGExInputValueType::Constant, LocalMaxDistance_DEPRECATED, MaxDistance_DEPRECATED);
 	}
 
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 #endif
 
+
+FName UPCGExSampleNearestSurfaceSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
+}
 
 TArray<FPCGPinProperties> UPCGExSampleNearestSurfaceSettings::InputPinProperties() const
 {
@@ -364,12 +375,27 @@ namespace PCGExSampleNearestSurface
 						}
 						else
 						{
-							UPhysicalMaterial* PhysMat = HitComp->GetBodyInstance()->GetSimplePhysicalMaterial();
-
-							PCGEX_OUTPUT_VALUE(ActorReference, Index, FSoftObjectPath(HitComp->GetOwner()->GetPathName()))
-							if (PhysMat)
+							if (const AActor* HitActor = HitComp->GetOwner())
 							{
-								PCGEX_OUTPUT_VALUE(PhysMat, Index, FSoftObjectPath(PhysMat->GetPathName()))
+								PCGEX_OUTPUT_VALUE(ActorReference, Index, FSoftObjectPath(HitActor->GetPathName()))
+							}
+
+							// Resolve the physical material through the physics engine (bReturnPhysicalMaterial)
+							// rather than FBodyInstance::GetSimplePhysicalMaterial(): the latter falls through to
+							// UMaterialInstance::GetPhysicalMaterial(), whose reentrancy guard is not safe to hit
+							// from multiple sampling worker threads at once and asserts under parallel processing.
+							if (PhysMatWriter)
+							{
+								FCollisionQueryParams PhysMatCollisionParams;
+								PhysMatCollisionParams.bReturnPhysicalMaterial = true;
+
+								FHitResult HitResult;
+								HitComp->LineTraceComponent(HitResult, HitLocation - Direction, HitLocation + Direction, PhysMatCollisionParams);
+
+								if (const UPhysicalMaterial* PhysMat = HitResult.PhysMaterial.Get())
+								{
+									PCGEX_OUTPUT_VALUE(PhysMat, Index, FSoftObjectPath(PhysMat->GetPathName()))
+								}
 							}
 						}
 					}

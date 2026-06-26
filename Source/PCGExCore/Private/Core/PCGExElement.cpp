@@ -34,9 +34,11 @@ bool IPCGExElement::PrepareDataInternal(FPCGContext* Context) const
 		InContext->bPreparationDispatchedOffThread = true;
 		InContext->PauseContext();
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = InContext->GetOrCreateHandle();
-		UE::Tasks::Launch(UE_SOURCE_LOCATION, [this, WeakHandle, InSettings]()
+		TWeakPtr<FPCGContextHandle> WeakHandle = InContext->GetWeakSelfHandle();
+		UE::Tasks::Launch(UE_SOURCE_LOCATION, [this, WeakHandle, InSettings, PinTracker = InContext->GetAsyncPinTracker()]()
 		{
+			// Count this drive as holding a context pin, incremented before the pin below.
+			PCGExMT::FAsyncContextPinScope PinScope(PinTracker);
 			FPCGContext::FSharedContext<FPCGExContext> Pinned(WeakHandle);
 			if (FPCGExContext* Ctx = Pinned.Get())
 			{
@@ -77,6 +79,18 @@ bool IPCGExElement::AdvancePreparation(FPCGExContext* Context, const UPCGExSetti
 				return Context->CancelExecution(FString());
 			}
 		}
+
+		// Many nodes cancel from their Boot() override by writing:
+		// {
+		//     return Context->CancelExecution(TEXT("..."));
+		// }
+		// and FPCGExContext::CancelExecution() returns true. 
+		// so Boot() returns true even though it just cancelled the context. 
+		// The `if (!Boot())` above does not catch that, so re-check here: 
+		// if Boot cancelled (or completed) execution, finalize now. Otherwise
+		// we would fall through to RegisterAssetDependencies/LoadAssets and re-pause an already-cancelled context,
+		// whose async completion (OnAsyncWorkEnd) refuses to resume it -> permanently wedged in PrepareData.
+		PCGEX_EXECUTION_CHECK_C(Context)
 
 		for (UPCGExInstancedFactory* Op : Context->InternalOperations)
 		{
@@ -159,7 +173,7 @@ FPCGContext* IPCGExElement::Initialize(const FPCGInitializeElementParams& InPara
 bool IPCGExElement::IsCacheable(const UPCGSettings* InSettings) const
 {
 	const UPCGExSettings* Settings = static_cast<const UPCGExSettings*>(InSettings);
-	return Settings->ShouldCache();
+	return !Settings->WantsDataStealing() && Settings->ShouldCache();
 }
 
 FPCGContext* IPCGExElement::CreateContext()
@@ -241,9 +255,11 @@ bool IPCGExElement::ExecuteInternal(FPCGContext* Context) const
 		InContext->bExecutionDispatchedOffThread = true;
 		InContext->PauseContext();
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = InContext->GetOrCreateHandle();
-		UE::Tasks::Launch(UE_SOURCE_LOCATION, [this, WeakHandle, InSettings]()
+		TWeakPtr<FPCGContextHandle> WeakHandle = InContext->GetWeakSelfHandle();
+		UE::Tasks::Launch(UE_SOURCE_LOCATION, [this, WeakHandle, InSettings, PinTracker = InContext->GetAsyncPinTracker()]()
 		{
+			// Count this drive as holding a context pin, incremented before the pin below.
+			PCGExMT::FAsyncContextPinScope PinScope(PinTracker);
 			FPCGContext::FSharedContext<FPCGExContext> Pinned(WeakHandle);
 			if (FPCGExContext* Ctx = Pinned.Get())
 			{

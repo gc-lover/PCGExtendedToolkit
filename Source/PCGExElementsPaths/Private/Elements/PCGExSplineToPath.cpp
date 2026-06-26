@@ -10,6 +10,7 @@
 #include "Data/PCGExDataTags.h"
 #include "Data/PCGExPointIO.h"
 #include "Data/PCGSplineData.h"
+#include "Data/Buffers/PCGExBufferProperty.h"
 #include "Helpers/PCGExRandomHelpers.h"
 #include "Math/PCGExBestFitPlane.h"
 #include "Math/PCGExProjectionDetails.h"
@@ -52,8 +53,9 @@ namespace PCGExSplineToPath
 
 			UPCGBasePointData* MutablePoints = PointDataFacade->Source->GetOut();
 			const int32 LastIndex = Spline.bClosedLoop ? NumSegments - 1 : NumSegments;
-			PCGExPointArrayDataHelpers::SetNumPointsAllocated(MutablePoints, NumPoints, EPCGPointNativeProperties::Transform | EPCGPointNativeProperties::Seed);
-
+			PCGExPointArrayDataHelpers::SetNumPointsAllocated(MutablePoints, NumPoints, EPCGPointNativeProperties::Transform | EPCGPointNativeProperties::Seed | EPCGPointNativeProperties::MetadataEntry);
+			(void)PointDataFacade->Source->GetOutKeys(true);
+			
 			// Detect winding and determine if we need to reverse the output order
 			bool bReverse = false;
 			if (Spline.bClosedLoop && Settings->Winding != EPCGExWindingMutation::Unchanged)
@@ -93,46 +95,8 @@ namespace PCGExSplineToPath
 
 			auto ApplyTransform = [&](const int32 Index, const FTransform& Transform)
 			{
-				if (Settings->TransformDetails.bInheritRotation && Settings->TransformDetails.bInheritScale)
-				{
-					OutTransforms[Index] = Transform;
-				}
-				else if (Settings->TransformDetails.bInheritRotation)
-				{
-					OutTransforms[Index].SetLocation(Transform.GetLocation());
-					OutTransforms[Index].SetRotation(Transform.GetRotation());
-				}
-				else if (Settings->TransformDetails.bInheritScale)
-				{
-					OutTransforms[Index].SetLocation(Transform.GetLocation());
-					OutTransforms[Index].SetScale3D(Transform.GetScale3D());
-				}
-				else
-				{
-					OutTransforms[Index].SetLocation(Transform.GetLocation());
-				}
-
+				Settings->TransformDetails.ApplyTo(OutTransforms[Index], Transform);
 				OutSeeds[Index] = PCGExRandomHelpers::ComputeSpatialSeed(OutTransforms[Index].GetLocation());
-			};
-
-			auto GetPointType = [](EInterpCurveMode Mode)-> int32
-			{
-				switch (Mode)
-				{
-				case CIM_Linear:
-					return 0;
-				case CIM_CurveAuto:
-					return 1;
-				case CIM_Constant:
-					return 2;
-				case CIM_CurveUser:
-					return 4;
-				case CIM_CurveAutoClamped:
-					return 3;
-				default: case CIM_Unknown:
-				case CIM_CurveBreak:
-					return -1;
-				}
 			};
 
 			const FTransform SplineTransform = Spline.GetTransform();
@@ -158,7 +122,7 @@ namespace PCGExSplineToPath
 					PCGEX_OUTPUT_VALUE(LeaveTangent, i, SplineTransform.TransformVector(SplinePositions.Points[ReadIndex].LeaveTangent));
 				}
 
-				PCGEX_OUTPUT_VALUE(PointType, i, GetPointType(SplinePositions.Points[ReadIndex].InterpMode));
+				PCGEX_OUTPUT_VALUE(PointType, i, PCGExPaths::Helpers::SplinePointTypeToInt(SplinePositions.Points[ReadIndex].InterpMode));
 			}
 
 			PCGExPaths::Helpers::SetClosedLoop(PointDataFacade->GetOut(), Spline.bClosedLoop);
@@ -181,7 +145,7 @@ namespace PCGExSplineToPath
 					PCGEX_OUTPUT_VALUE(LeaveTangent, LastIndex, SplineTransform.TransformVector(SplinePositions.Points[NumSegments].LeaveTangent));
 				}
 
-				PCGEX_OUTPUT_VALUE(PointType, LastIndex, GetPointType(SplinePositions.Points[NumSegments].InterpMode));
+				PCGEX_OUTPUT_VALUE(PointType, LastIndex, PCGExPaths::Helpers::SplinePointTypeToInt(SplinePositions.Points[NumSegments].InterpMode));
 			}
 
 			// Copy attributes
@@ -194,52 +158,117 @@ namespace PCGExSplineToPath
 			{
 				TPCGValueRange<int64> OutMeta = MutablePoints->GetMetadataEntryValueRange();
 
+				/*
 				for (int64& Key : OutMeta)
 				{
 					MutablePoints->Metadata->InitializeOnSet(Key);
 				}
+				*/
 
 				const TSharedPtr<FPCGAttributeAccessorKeysEntries> Keys = MakeShared<FPCGAttributeAccessorKeysEntries>(SplineData->Metadata);
 
 				for (PCGExData::FAttributeIdentity Identity : SourceAttributes)
 				{
-					PCGExMetaHelpers::ExecuteWithRightType(Identity.UnderlyingType, [&](auto DummyValue)
-					{
-						using T = decltype(DummyValue);
-						const FPCGMetadataAttribute<T>* SourceAttr = SplineData->Metadata->GetConstTypedAttribute<T>(Identity.Identifier);
-
-						if (!SourceAttr)
+					PCGExMetaHelpers::ExecuteWithRightType(
+						Identity,
+						[&](auto DummyValue)
 						{
-							return;
-						}
+							using T = decltype(DummyValue);
+							const FPCGMetadataAttribute<T>* SourceAttr = SplineData->Metadata->GetConstTypedAttribute<T>(Identity.GetIdentifier());
 
-						TSharedPtr<PCGExData::TBuffer<T>> OutBuffer = PointDataFacade->GetWritable<T>(SourceAttr, PCGExData::EBufferInit::New);
-
-						if (Identity.InDataDomain())
-						{
-							OutBuffer->SetValue(0, PCGExData::Helpers::ReadDataValue(SourceAttr));
-							return;
-						}
-
-						TSharedPtr<PCGExData::TArrayBuffer<T>> OutArrayBuffer = StaticCastSharedPtr<PCGExData::TArrayBuffer<T>>(OutBuffer);
-						TArrayView<T> InRange = MakeArrayView(OutArrayBuffer->GetOutValues()->GetData(), OutArrayBuffer->GetOutValues()->Num());
-
-						if (Keys)
-						{
-							TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(SourceAttr, SplineData->Metadata);
-							InAccessor->GetRange(InRange, 0, *Keys.Get());
-
-							// Reverse carried-over attributes to match the reversed point order
-							if (bReverse && !Identity.InDataDomain())
+							if (!SourceAttr)
 							{
-								Algo::Reverse(InRange);
+								return;
 							}
-						}
-						else
+
+							TSharedPtr<PCGExData::TBuffer<T>> OutBuffer = PointDataFacade->GetWritable<T>(SourceAttr, PCGExData::EBufferInit::New);
+
+							if (Identity.InDataDomain())
+							{
+								OutBuffer->SetValue(0, PCGExData::Helpers::ReadDataValue<T>(SourceAttr));
+								return;
+							}
+
+							TSharedPtr<PCGExData::TArrayBuffer<T>> OutArrayBuffer = StaticCastSharedPtr<PCGExData::TArrayBuffer<T>>(OutBuffer);
+							TArrayView<T> InRange = MakeArrayView(OutArrayBuffer->GetOutValues()->GetData(), OutArrayBuffer->GetOutValues()->Num());
+
+							if (Keys)
+							{
+								TUniquePtr<const IPCGAttributeAccessor> InAccessor = PCGAttributeAccessorHelpers::CreateConstAccessor(SourceAttr, SourceAttr->GetMetadataDomain());
+								InAccessor->GetRange(InRange, 0, *Keys.Get());
+
+								// Reverse carried-over attributes to match the reversed point order
+								if (bReverse && !Identity.InDataDomain())
+								{
+									Algo::Reverse(InRange);
+								}
+							}
+							else
+							{
+								//PCGE_LOG_C(Warning, GraphAndLog, Context, FText::Format(FTEXT("Attribute {0} could not be copied."), FText::FromName(Identity.Name)));
+							}
+						},
+						[&]()
 						{
-							//PCGE_LOG_C(Warning, GraphAndLog, Context, FText::Format(FTEXT("Attribute {0} could not be copied."), FText::FromName(Identity.Identifier.Name)));
-						}
-					});
+							// Property-backed spline-to-path carry. Data domain is straightforward (single value);
+							// the elements-domain path needs per-entry keys from the spline metadata, which
+							// FPCGAttributeAccessorKeysEntries doesn't expose directly. Iterate via the
+							// engine accessor's GetMetadataEntryKeys interface for the elements case.
+							const FPCGMetadataAttributeBase* SourceAttr = Identity.Attribute;
+							if (!SourceAttr)
+							{
+								return;
+							}
+
+							TSharedPtr<PCGExData::IBuffer> OutBuffer = PointDataFacade->GetWritable(Identity.GetType(), SourceAttr, PCGExData::EBufferInit::New);
+							if (!OutBuffer)
+							{
+								return;
+							}
+
+							if (Identity.InDataDomain())
+							{
+								PCGExData::Helpers::PropertyBroadcastAttribute(SourceAttr, PCGDefaultValueKey, OutBuffer);
+								return;
+							}
+
+							if (!Keys || !OutBuffer->IsPropertyBacked())
+							{
+								return;
+							}
+							const TSharedPtr<PCGExData::FPropertyArrayBuffer> ArrayBuffer = StaticCastSharedPtr<PCGExData::FPropertyArrayBuffer>(OutBuffer);
+
+							// Pull per-entry keys via the IPCGAttributeAccessorKeys public templated interface
+							// (GetMetadataEntryKeys is protected on FPCGAttributeAccessorKeysEntries).
+							const int32 Num = OutBuffer->GetNumValues(PCGExData::EIOSide::Out);
+							const int32 NumKeys = Keys->GetNum();
+							TArray<PCGMetadataEntryKey> EntryKeyBuf;
+							EntryKeyBuf.SetNumZeroed(NumKeys);
+							TArray<PCGMetadataEntryKey*> KeyPtrs;
+							KeyPtrs.Reserve(NumKeys);
+
+							for (int32 k = 0; k < NumKeys; k++)
+							{
+								KeyPtrs.Add(&EntryKeyBuf[k]);
+							}
+							if (!Keys->GetKeys<PCGMetadataEntryKey>(0, MakeArrayView(KeyPtrs)))
+							{
+								return;
+							}
+
+							for (int32 i = 0; i < Num; i++)
+							{
+								const int32 ReadIdx = bReverse ? (NumKeys - 1 - i) : i;
+								if (!EntryKeyBuf.IsValidIndex(ReadIdx))
+								{
+									continue;
+								}
+								if (const void* SrcAddr = SourceAttr->GetReadAddressFromEntryKey_Unsafe(EntryKeyBuf[ReadIdx]))
+								{
+									ArrayBuffer->SetFromVoidProperty(i, SrcAddr);
+								}
+							}
+						});
 				}
 			}
 
@@ -360,9 +389,12 @@ bool FPCGExSplineToPathElement::AdvanceWork(FPCGExContext* InContext, const UPCG
 			}
 
 			PCGEX_MAKE_SHARED(PointDataFacade, PCGExData::FFacade, NewOutput.ToSharedRef())
-			PCGEX_LAUNCH(PCGExSplineToPath::FWriteTask, i, PointDataFacade)
 
+			// Tags must be fully appended before the task is published -- FWriteTask
+			// reads them off-thread (TagsToData), and FTags iteration is lock-free.
 			NewOutput->Tags->Append(Context->Tags[i]);
+
+			PCGEX_LAUNCH(PCGExSplineToPath::FWriteTask, i, PointDataFacade)
 		}
 
 		Context->SetState(PCGExCommon::States::State_WaitingOnAsyncWork);

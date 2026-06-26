@@ -4,6 +4,7 @@
 #include "Data/PCGExDataValue.h"
 #include "Metadata/PCGMetadataAttributeTpl.h"
 
+#include "PCGData.h"
 #include "Data/PCGExDataHelpers.h"
 #include "Data/PCGExSubSelection.h"
 #include "Helpers/PCGExMetaHelpers.h"
@@ -30,6 +31,10 @@ namespace PCGExData
 	template <typename T>
 	T IDataValue::GetValue()
 	{
+		if (GetTypeId() == PCGExTypes::TTraits<T>::Type)
+		{
+			return static_cast<TDataValue<T>*>(this)->Value;
+		}
 		if (IsNumeric())
 		{
 			return PCGExTypeOps::Convert<double, T>(AsDouble());
@@ -205,17 +210,19 @@ template class PCGEXCORE_API TDataValue<_TYPE>;
 
 		if (const FPCGMetadataAttributeBase* SourceAttribute = InMetadata->GetConstAttribute(SanitizedIdentifier))
 		{
-			PCGExMetaHelpers::ExecuteWithRightType(SourceAttribute->GetTypeId(), [&](auto DummyValue)
+			// Container/extended source types fall through -- TDataValue<T> is templated on basic types only,
+			// so we can't represent them. Caller gets nullptr DataValue and skips.
+			PCGExMetaHelpers::ExecuteWithRightType(SourceAttribute, [&](auto DummyValue)
 			{
 				using T = decltype(DummyValue);
-				const T Value = Helpers::ReadDataValue<T>(static_cast<const FPCGMetadataAttribute<T>*>(SourceAttribute));
+				const T Value = Helpers::ReadDataValue<T>(SourceAttribute);
 
 				FSubSelection SubSelection(Selector);
 				TSharedPtr<IDataValue> TypedDataValue = nullptr;
 
-				if (SubSelection.bIsValid)
+				if (SubSelection.HasSelection())
 				{
-					PCGExMetaHelpers::ExecuteWithRightType(SourceAttribute->GetTypeId(), [&](auto WorkingValue)
+					PCGExMetaHelpers::ExecuteWithRightType(SourceAttribute, [&](auto WorkingValue)
 					{
 						using T_WORKING = decltype(DummyValue);
 						TypedDataValue = MakeShared<TDataValue<T_WORKING>>(SubSelection.Get<T, T_WORKING>(Value));
@@ -239,5 +246,26 @@ template class PCGEXCORE_API TDataValue<_TYPE>;
 		Selector.Update(InName.ToString());
 
 		return TryGetValueFromData(InData, Selector);
+	}
+
+	TSharedPtr<IDataValue> TryGetValueFromData(const FPCGTaggedData& InTaggedData, const FPCGAttributePropertyInputSelector& InSelector)
+	{
+		// Tag-first: match the selector name against the "key:value" tags.
+		const FString TagName = InSelector.GetName().ToString();
+		if (!TagName.IsEmpty())
+		{
+			for (const FString& Tag : InTaggedData.Tags)
+			{
+				FString LeftSide;
+				if (TSharedPtr<IDataValue> TagValue = TryGetValueFromTag(Tag, LeftSide);
+					TagValue && LeftSide == TagName)
+				{
+					return TagValue;
+				}
+			}
+		}
+
+		// Fallback: data-domain attribute.
+		return TryGetValueFromData(InTaggedData.Data, InSelector);
 	}
 }

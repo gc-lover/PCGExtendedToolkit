@@ -7,6 +7,7 @@
 #include "PCGComponent.h"
 
 #include "PCGParamData.h"
+#include "Core/PCGExMT.h"
 #include "Data/PCGExAttributeBroadcaster.h"
 #include "Data/PCGExPointIO.h"
 #include "Elements/PCGExecuteBlueprint.h"
@@ -117,7 +118,7 @@ void UPCGExCustomActorDataPacker::PreloadObjectPaths(const FName& InAttributeNam
 		return;
 	}
 
-	if (Identity->UnderlyingType == EPCGMetadataTypes::String)
+	if (Identity->ValueType == EPCGMetadataTypes::String)
 	{
 		if (TSharedPtr<PCGExData::TArrayBuffer<FString>> Buffer = ReadBuffers->GetBuffer<FString>(InAttributeName))
 		{
@@ -129,7 +130,7 @@ void UPCGExCustomActorDataPacker::PreloadObjectPaths(const FName& InAttributeNam
 		}
 	}
 
-	if (Identity->UnderlyingType == EPCGMetadataTypes::SoftObjectPath)
+	if (Identity->ValueType == EPCGMetadataTypes::SoftObjectPath)
 	{
 		if (TSharedPtr<PCGExData::TArrayBuffer<FSoftObjectPath>> Buffer = ReadBuffers->GetBuffer<FSoftObjectPath>(InAttributeName))
 		{
@@ -273,6 +274,11 @@ bool FPCGExPackActorDataElement::AdvanceWork(FPCGExContext* InContext, const UPC
 		}
 	}
 
+	// When bExecuteOnMainThread, the batch drives a main-thread loop whose ProcessEntry can create components/actors
+	// (AddComponent -> ManagedObjects->New / AttachManagedComponent) -- illegal during a package save or GC. Defer the
+	// whole output phase (re-tick) until it finishes.
+	PCGEX_DEFER_IF_OBJECT_WORK_BLOCKED
+
 	PCGEX_POINTS_BATCH_PROCESSING(PCGExCommon::States::State_Done)
 
 	Context->MainPoints->StageOutputs();
@@ -411,14 +417,42 @@ namespace PCGExPackActorData
 				}
 
 				FPCGPoint& Point = PointsForProcessing[Index];
-				Packer->ProcessEntry(ActorRef, Point, Index, Point);
+
+				if (Settings->bTrackActors)
+				{
+					Context->GetMutableComponent()->IgnoreChangeOriginDuringGenerationWithScope(ActorRef, [&]()
+					{
+						Packer->ProcessEntry(ActorRef, Point, Index, Point);
+					});
+				}
+				else
+				{
+					Packer->ProcessEntry(ActorRef, Point, Index, Point);
+				}
 			};
 
 			PCGEX_ASYNC_HANDLE_CHKD_VOID(TaskManager, MainThreadLoop)
 		}
 		else
 		{
-			StartParallelLoopForPoints();
+			if (Settings->bTrackActors)
+			{
+				TArray<const UObject*> ActorRefsArray;
+				ActorRefsArray.Init(nullptr, UniqueActors.Num());
+				for (AActor* ActorRef : UniqueActors)
+				{
+					ActorRefsArray.Add(ActorRef);
+				}
+
+				Context->GetMutableComponent()->IgnoreChangeOriginsDuringGenerationWithScope(ActorRefsArray, [&]()
+				{
+					StartParallelLoopForPoints();
+				});
+			}
+			else
+			{
+				StartParallelLoopForPoints();
+			}
 		}
 	}
 

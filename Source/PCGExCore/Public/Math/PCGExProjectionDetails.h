@@ -57,13 +57,13 @@ struct PCGEXCORE_API FPCGExGeo2DProjectionDetails
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FVector ProjectionNormal_DEPRECATED = FVector::UpVector;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bLocalProjectionNormal_DEPRECATED = false;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector LocalNormal_DEPRECATED;
 
 #pragma endregion
@@ -124,6 +124,7 @@ public:
 	void ProjectFlat(const TSharedPtr<PCGExData::FFacade>& InFacade, TArray<T>& OutPositions) const;
 
 	void Project(const TArray<FVector>& InPositions, TArray<FVector>& OutPositions) const;
+	void Project(const TArrayView<FVector>& InPositions, TArray<FVector>& OutPositions) const;
 	void Project(const TArrayView<FVector>& InPositions, TArray<FVector2D>& OutPositions) const;
 	void Project(const TConstPCGValueRange<FTransform>& InTransforms, TArray<FVector2D>& OutPositions) const;
 	void Project(const TArrayView<FVector>& InPositions, std::vector<double>& OutPositions) const;

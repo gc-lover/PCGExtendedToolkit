@@ -7,11 +7,14 @@
 #include "PCGExEnumSelector.h"
 #include "PCGExInlineWidgetRegistry.h"
 #include "PCGExProperty.h"
+#include "PCGExPropertyType_Struct.h"
 #include "PCGExPropertyTypes.h"
 #include "PCGExPropertyWriter.h"
 #include "PropertyEditorModule.h"
+#include "Metadata/PCGObjectPropertyOverride.h"
 #include "Details/PCGExEnumSelectorCustomization.h"
 #include "Details/PCGExNumericRangeCustomization.h"
+#include "Details/PCGExObjectPropertyOverrideDescriptionCustomization.h"
 #include "Details/PCGExPropertyCompiledCustomization.h"
 #include "Details/PCGExPropertyOutputConfigCustomization.h"
 #include "Details/PCGExPropertyOverrideEntryCustomization.h"
@@ -74,6 +77,12 @@ void FPCGExPropertiesEditorModule::StartupModule()
 		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FPCGExPropertyOutputConfigCustomization::MakeInstance)
 		);
 
+	// FPCGObjectPropertyOverrideDescription (engine struct) -> compact inline [source] -> [target]. Global by FName.
+	PropertyModule.RegisterCustomPropertyTypeLayout(
+		FPCGObjectPropertyOverrideDescription::StaticStruct()->GetFName(),
+		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FPCGExObjectPropertyOverrideDescriptionCustomization::MakeInstance)
+		);
+
 	// Register FPCGExWeightedPropertyOverrides customization - weight in header + flattened overrides
 	// Used by DistributeTuple (Values array)
 	PropertyModule.RegisterCustomPropertyTypeLayout(
@@ -106,6 +115,7 @@ void FPCGExPropertiesEditorModule::StartupModule()
 	REGISTER_PROPERTY_COMPILED_CUSTOMIZATION(SoftObjectPath)
 	REGISTER_PROPERTY_COMPILED_CUSTOMIZATION(SoftClassPath)
 	REGISTER_PROPERTY_COMPILED_CUSTOMIZATION(Enum)
+	REGISTER_PROPERTY_COMPILED_CUSTOMIZATION(Struct)
 
 #undef REGISTER_PROPERTY_COMPILED_CUSTOMIZATION
 

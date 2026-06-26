@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "Utils/PCGExCompare.h"
+#include "Metadata/PCGMetadataCommon.h"
 
 #include "PCGExDataFilterDetails.generated.h"
 
@@ -32,6 +33,14 @@ enum class EPCGExAttributeFilter : uint8
 	Exclude = 1 UMETA(DisplayName = "Exclude", ToolTip="Discard listed elements, keep the others", ActionIcon="Exclude"),
 	Include = 2 UMETA(DisplayName = "Include", ToolTip="Keep listed elements, discard the others", ActionIcon="Include"),
 };
+
+namespace PCGExDataFilter
+{
+	namespace Helpers
+	{
+		void PCGEXCORE_API GetAttributes(const UPCGMetadata* InMetadata, EPCGExAttributeDomainScope InScope, TArray<FPCGAttributeIdentifier>& Identifiers);
+	}
+}
 
 USTRUCT(BlueprintType)
 struct PCGEXCORE_API FPCGExNameFiltersDetails
@@ -60,7 +69,7 @@ struct PCGEXCORE_API FPCGExNameFiltersDetails
 	FString CommaSeparatedNames;
 
 	/** Unique filter mode applied to comma separated names */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, EditCondition="FilterMode != EPCGExAttributeFilter::All", EditConditionHides))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable, EditCondition="FilterMode != EPCGExAttributeFilter::All", EditConditionHides))
 	EPCGExStringMatchMode CommaSeparatedNameFilter = EPCGExStringMatchMode::Equals;
 
 	/** If enabled, PCGEx attributes & tags won't be affected.  Cluster-related nodes rely on these to work! */
@@ -76,6 +85,16 @@ struct PCGEXCORE_API FPCGExNameFiltersDetails
 	void Prune(TSet<FName>& Names, bool bInvert = false) const;
 	void Prune(PCGExData::FAttributesInfos& InAttributeInfos, const bool bInvert = false) const;
 };
+
+namespace PCGExDataFilter
+{
+	// Centralizes the 'bEnabled ? &Filters : nullptr' idiom for opt-in name filters, repeated at every
+	// merge call site that forwards a TagsToAttributes filter to FPCGExPointIOMerger / FMergeList.
+	FORCEINLINE const FPCGExNameFiltersDetails* ResolveOptional(const bool bEnabled, const FPCGExNameFiltersDetails& Filters)
+	{
+		return bEnabled ? &Filters : nullptr;
+	}
+}
 
 USTRUCT(BlueprintType)
 struct PCGEXCORE_API FPCGExAttributeGatherDetails : public FPCGExNameFiltersDetails
@@ -96,25 +115,37 @@ struct PCGEXCORE_API FPCGExCarryOverDetails
 	{
 	}
 
+	explicit FPCGExCarryOverDetails(const bool InUsedForCleanup)
+		:bUsedForCleanup(InUsedForCleanup)
+	{
+	}
+	
+	UPROPERTY()
+	bool bUsedForCleanup = false;
+		
 	/** If enabled, will preserve the initial attribute default value. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable, EditCondition="!bUsedForCleanup", EditConditionHides, HideEditConditionToggle))
 	bool bPreserveAttributesDefaultValue = false;
 
 	/** Attributes to carry over. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
 	FPCGExNameFiltersDetails Attributes = FPCGExNameFiltersDetails(false);
 
-	/** If enabled, will convert data domain attributes to elements domain ones.
-	 * Note : This is not used by all nodes. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable, DisplayName=" └─ Data domain to Elements"))
-	bool bDataDomainToElements = true;
+	/** If enabled, data domain attributes are promoted to the elements domain (the single @Data value is
+	 * broadcast to every point). Off by default; Merge Points is the node that enables it. Not used by all nodes. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable, DisplayName=" ├─ Data domain to Elements", EditCondition="!bUsedForCleanup", EditConditionHides, HideEditConditionToggle))
+	bool bDataDomainToElements = false;
+
+	/** Scope */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable, DisplayName=" └─ Scope", EditCondition="bUsedForCleanup", EditConditionHides, HideEditConditionToggle))
+	EPCGExAttributeDomainScope Scope = EPCGExAttributeDomainScope::Any;
 
 	/** Tags to carry over. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
 	FPCGExNameFiltersDetails Tags = FPCGExNameFiltersDetails(false);
 
 	/** If enabled, will test full tag with its value ('Tag:Value'), otherwise only test the left part ignoring the right `:Value` ('Tag'). */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable, DisplayName=" └─ Flatten tag value"))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_NotOverridable, DisplayName=" └─ Flatten tag value", EditCondition="!bUsedForCleanup", EditConditionHides, HideEditConditionToggle))
 	bool bTestTagsWithValues = false;
 
 	void Init();
@@ -128,7 +159,9 @@ struct PCGEXCORE_API FPCGExCarryOverDetails
 	bool Test(const PCGExData::FPointIO* PointIO) const;
 	bool Test(PCGExData::FTags* InTags) const;
 
+	bool GetPrunableIdentifiers(const UPCGMetadata* Metadata, TArray<FPCGAttributeIdentifier>& Identifiers) const;
 	void Prune(UPCGMetadata* Metadata) const;
+	
 
 	bool Test(const UPCGMetadata* Metadata) const;
 };

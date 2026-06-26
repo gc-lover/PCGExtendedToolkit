@@ -66,6 +66,7 @@ namespace PCGExBlending
 	class IUnionBlender;
 	class FUnionOpsManager;
 	class FUnionBlender;
+	class FBlendOpsSchema;
 }
 
 UENUM()
@@ -89,6 +90,7 @@ public:
 
 	//~Begin UPCGSettings
 #if WITH_EDITOR
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
 	PCGEX_NODE_INFOS(SampleNearestBounds, "Sample : Nearest Bounds", "Sample nearest target bounds.");
 
 	virtual FLinearColor GetNodeTitleColor() const override
@@ -98,6 +100,7 @@ public:
 #endif
 
 protected:
+	virtual FName GetMainInputPin() const override;
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
 	virtual TArray<FPCGPinProperties> OutputPinProperties() const override;
 	virtual bool IsPinUsedByNodeExecution(const UPCGPin* InPin) const override;
@@ -327,6 +330,10 @@ struct FPCGExSampleNearestBoundsContext final : FPCGExPointsProcessorContext
 	friend class FPCGExSampleNearestBoundsElement;
 
 	TArray<TObjectPtr<const UPCGExBlendOpFactory>> BlendingFactories;
+
+	// Blend configs resolved once in Boot and shared across processors -- per-processor
+	// blender init only instantiates ops instead of re-enumerating target metadata.
+	TSharedPtr<PCGExBlending::FBlendOpsSchema> BlendOpsSchema;
 
 	TSharedPtr<PCGExMatching::FTargetsHandler> TargetsHandler;
 	int32 NumMaxTargets = 0;

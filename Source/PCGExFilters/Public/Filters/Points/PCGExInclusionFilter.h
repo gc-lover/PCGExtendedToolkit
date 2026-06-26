@@ -14,11 +14,6 @@
 
 #include "PCGExInclusionFilter.generated.h"
 
-namespace PCGExMatching
-{
-	class FDataMatcher;
-}
-
 USTRUCT(BlueprintType)
 struct FPCGExInclusionFilterConfig
 {
@@ -39,6 +34,14 @@ struct FPCGExInclusionFilterConfig
 	/** Type of inclusion check to perform. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
 	EPCGExSplineCheckType CheckType = EPCGExSplineCheckType::IsInside;
+
+	/** How the tested point's bounds factor into the check. Center (default) tests the point location only and is
+	 *  fastest. Sphere/Box widen the on-boundary band by the bound's reach so the check applies to the whole bound,
+	 *  but the meaning depends on the check: "Is Inside" requires the *entire* bound inside, "Is Outside" entirely
+	 *  outside, while the On family ("Is On", "...Or On", "...And On") treat the bound as On when it touches/crosses
+	 *  a boundary. More expensive (forces the distance path). The hidden "None" value falls back to Center. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
+	EPCGExDistance BoundsCheck = EPCGExDistance::Center;
 
 	/** If a point is both inside and outside a spline (if there are multiple ones), decide what value to favor. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
@@ -97,7 +100,7 @@ struct FPCGExInclusionFilterConfig
 	bool bIgnoreSelf = true;
 
 	/** Data matching settings. When enabled, only paths whose data matches the input being tested will be considered. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, ShowOnlyInnerProperties))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
 	FPCGExFilterMatchingDetails DataMatching;
 };
 
@@ -131,20 +134,20 @@ namespace PCGExPointFilter
 			  , TypedFilterFactory(InFactory)
 		{
 			Handler = TypedFilterFactory->CreateHandler();
-			Handler->Init(TypedFilterFactory->Config.CheckType);
+			Handler->Init(TypedFilterFactory->Config.CheckType, TypedFilterFactory->Config.BoundsCheck);
 			Handler->ToleranceScaleFactor = FVector(0, 1, 1);
 		}
 
 		const TObjectPtr<const UPCGExInclusionFilterFactory> TypedFilterFactory;
 		TSharedPtr<PCGExPathInclusion::FHandler> Handler;
 
-		// Per-point matching -- see FDistanceFilter for full explanation.
-		// Exclude set is passed to FHandler via InAdditionalExclude (alongside static MatchIgnoreList).
-		TSharedPtr<PCGExMatching::FDataMatcher> InverseMatcher;
-		bool bNoMatchResult = false;
-
 		bool bCheckAgainstDataBounds = false;
+
+		// Cached input value ranges for the per-point hot path (Test(int32)) -- read directly, no FPoint virtual
+		// dispatch. BoundsMin/Max are only consumed by the handler when BoundsCheck != Center.
 		TConstPCGValueRange<FTransform> InTransforms;
+		TConstPCGValueRange<FVector> InBoundsMin;
+		TConstPCGValueRange<FVector> InBoundsMax;
 
 		virtual bool Init(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& InPointDataFacade) override;
 
@@ -168,7 +171,7 @@ class UPCGExInclusionFilterProviderSettings : public UPCGExFilterProviderSetting
 public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS_CUSTOM_SUBTITLE(InclusionFilterFactory, "Filter : Inclusion (Path/Splines)", "Creates a filter definition that checks points inclusion against path-like data (paths, splines, polygons).", PCGEX_FACTORY_NAME_PRIORITY)
 	virtual TArray<FPCGPreConfiguredSettingsInfo> GetPreconfiguredInfo() const override;

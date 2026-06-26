@@ -64,22 +64,22 @@ struct FPCGExShapePolygonConfig : public FPCGExShapeConfigBase
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType NumVerticesInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector NumVerticesAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	int32 NumVerticesConstant_DEPRECATED = 5;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType AddSkeletonInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector AddSkeletonAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bAddSkeleton_DEPRECATED = false;
 
 #pragma endregion
@@ -187,7 +187,7 @@ public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
 	virtual void PCGExApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 	PCGEX_NODE_INFOS_CUSTOM_SUBTITLE(ShapeBuilderCircle, "Shape : Polygon", "Create points as a regular polygon or star.", FName ("Polygon"))
 
 #endif

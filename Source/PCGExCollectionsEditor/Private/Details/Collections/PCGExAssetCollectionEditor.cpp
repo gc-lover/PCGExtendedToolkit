@@ -214,6 +214,12 @@ void FPCGExAssetCollectionEditor::RegisterPropertyNameMapping(TMap<FName, FName>
 	PCGEX_DECL_ASSET_FILTER(Variations_Scale, "AssetEditor.Variations.Scale", "Var : Scale", "Show/hide Variations : Scale")
 	Mapping.Add(FName("VariationScale"), Variations_Scale.Id);
 
+	PCGEX_DECL_ASSET_FILTER(Fitting, "AssetEditor.Fitting", "Fitting", "Show/hide Fitting overrides")
+	Mapping.Add(FName("ScaleToFitSource"), Fitting.Id);
+	Mapping.Add(FName("ScaleToFit"), Fitting.Id);
+	Mapping.Add(FName("JustificationSource"), Fitting.Id);
+	Mapping.Add(FName("Justification"), Fitting.Id);
+
 	PCGEX_DECL_ASSET_FILTER(Tags, "AssetEditor.Tags", "Tags", "Show/hide Tags")
 	Mapping.Add(FName("Tags"), Tags.Id);
 
@@ -250,6 +256,13 @@ void FPCGExAssetCollectionEditor::RegisterPushOptions(TArray<PCGExAssetCollectio
 		"Push variation mode and fitting variations from the active entry to other selected entries.",
 		false,
 		FName("VariationMode"), FName("Variations"))
+
+	PCGEX_DECL_PUSH_OPTION(
+		"AssetEditor.Push.Fitting",
+		"Fitting Overrides",
+		"Push scale-to-fit and justification overrides from the active entry to other selected entries.",
+		false,
+		FName("ScaleToFitSource"), FName("ScaleToFit"), FName("JustificationSource"), FName("Justification"))
 
 	PCGEX_DECL_PUSH_OPTION(
 		"AssetEditor.Push.Tags",
@@ -740,7 +753,7 @@ TSharedRef<SWidget> FPCGExAssetCollectionEditor::BuildTilePickerWidget(
 #define PCGEX_SECTION_HEADER(_LABEL) \
 ToolbarBuilder.AddWidget(\
 SNew(SBox).VAlign(VAlign_Center).HAlign(HAlign_Center).Padding(FMargin(8, 0))[\
-SNew(STextBlock).Text(INVTEXT(_LABEL)).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).ColorAndOpacity(FSlateColor(FLinearColor(1, 1, 1, 0.8)))\
+SNew(STextBlock).Text(INVTEXT(_LABEL)).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.8f)))\
 .Justification(ETextJustify::Center)]);
 
 void FPCGExAssetCollectionEditor::BuildEditorToolbar(FToolBarBuilder& ToolbarBuilder)
@@ -1105,7 +1118,7 @@ void FPCGExAssetCollectionEditor::BuildAssetFooterToolbar(FToolBarBuilder& Toolb
 				.ButtonColorAndOpacity_Lambda(
 					[Filter]
 					{
-						return GetMutableDefault<UPCGExCollectionsEditorSettings>()->GetIsPropertyVisible(Filter.Id) ? FLinearColor(0.005, 0.005, 0.005, 0.5) : FLinearColor::Transparent;
+						return GetMutableDefault<UPCGExCollectionsEditorSettings>()->GetIsPropertyVisible(Filter.Id) ? FLinearColor(0.005f, 0.005f, 0.005f, 0.5f) : FLinearColor::Transparent;
 					})
 				.ToolTipText(Filter.ToolTip)
 				[

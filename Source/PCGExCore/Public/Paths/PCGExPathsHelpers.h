@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Core/PCGExMTCommon.h"
+#include "Math/InterpCurvePoint.h" // EInterpCurveMode
 #include "Math/PCGExMath.h"
 
 struct FPCGExPathIntersectionDetails;
@@ -64,6 +65,10 @@ namespace PCGExPaths
 
 		PCGEXCORE_API FTransform GetClosestTransform(const TSharedPtr<const FPCGSplineStruct>& InSpline, const FVector& InLocation, const bool bUseScale = true);
 
+		/** Canonical encoding of a spline control point's interp mode to int32, shared by nodes that emit a
+		 *  "PointType" attribute (Spline to Path, Get Path Data) so the values stay consistent across them. */
+		PCGEXCORE_API int32 SplinePointTypeToInt(const EInterpCurveMode Mode);
+
 		PCGEXCORE_API TSharedPtr<FPCGSplineStruct> MakeSplineFromPoints(const TConstPCGValueRange<FTransform>& InTransforms, const EPCGExSplinePointTypeRedux InPointType, const bool bClosedLoop, bool bSmoothLinear);
 
 		PCGEXCORE_API TSharedPtr<FPCGSplineStruct> MakeSplineCopy(const FPCGSplineStruct& Original);
@@ -118,8 +123,9 @@ namespace PCGExPaths
 	struct PCGEXCORE_API FInclusionInfos
 	{
 		FInclusionInfos() = default;
-		int32 Depth = 0;    // Inclusion "depth"
-		int32 Children = 0; // Number of paths included in this one
+		int32 Depth = 0;       // Inclusion "depth"
+		int32 Children = 0;    // Number of paths included in this one
+		int32 ParentIdx = -1;  // Idx of the nearest enclosing path (direct parent); -1 when not enclosed (outer)
 		bool bOdd = false;
 	};
 
@@ -129,6 +135,13 @@ namespace PCGExPaths
 		TSet<int32> PathsSet;
 		TArray<TSharedPtr<FPath>> Paths;
 		TMap<int32, FInclusionInfos> IdxMap;
+
+		// Recorded (ContainerIdx, ContainedIdx) pairs, used to resolve each path's nearest
+		// enclosing parent once all depths are final (see ResolveParents).
+		TArray<TPair<int32, int32>> Containments;
+
+		// Resolves FInclusionInfos::ParentIdx for every path (nearest parent = deepest container).
+		void ResolveParents();
 
 	public:
 		FPathInclusionHelper() = default;

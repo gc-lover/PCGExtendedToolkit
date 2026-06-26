@@ -7,6 +7,8 @@
 #include "Data/PCGExPointElements.h"
 #include "Data/PCGExPointIO.h"
 #include "Data/PCGPointArrayData.h"
+#include "Helpers/PCGExMetaHelpers.h"
+#include "Metadata/PCGMetadataAttribute.h"
 
 namespace PCGExData
 {
@@ -29,31 +31,9 @@ namespace PCGExData
 
 	bool FProxyDescriptor::Capture(FPCGExContext* InContext, const FString& Path, const EIOSide InSide, const bool bRequired)
 	{
-		const TSharedPtr<FFacade> InFacade = DataFacade.Pin();
-		check(InFacade);
-
-		bool bValid = true;
-
-		Selector = FPCGAttributePropertyInputSelector();
-		Selector.Update(Path);
-
-		Side = InSide;
-
-		if (!TryGetTypeAndSource(Selector, InFacade, RealType, Side))
-		{
-			if (bRequired)
-			{
-				PCGEX_LOG_INVALID_SELECTOR_C(InContext, , Selector)
-			}
-			bValid = false;
-		}
-
-		Selector = Selector.CopyAndFixLast(InFacade->Source->GetData(Side));
-
-		UpdateSubSelection();
-		WorkingType = SubSelection.GetSubType(RealType);
-
-		return bValid;
+		FPCGAttributePropertyInputSelector NewSelector;
+		NewSelector.Update(Path);
+		return Capture(InContext, NewSelector, InSide, bRequired);
 	}
 
 	bool FProxyDescriptor::Capture(FPCGExContext* InContext, const FPCGAttributePropertyInputSelector& InSelector, const EIOSide InSide, const bool bRequired)
@@ -78,6 +58,22 @@ namespace PCGExData
 
 		UpdateSubSelection();
 		WorkingType = SubSelection.GetSubType(RealType);
+
+		// Cache the source attribute's Desc. Reset to default first so SourceDesc.IsValid()
+		// returns false when the selector isn't an attribute (point property, extra property).
+		SourceDesc = FPCGMetadataAttributeDesc{};
+		if (Selector.GetSelection() == EPCGAttributePropertySelection::Attribute)
+		{
+			if (const UPCGData* InData = InFacade->Source->GetData(Side);
+				InData && InData->Metadata)
+			{
+				if (const FPCGMetadataAttributeBase* Attr = InData->Metadata->GetConstAttribute(
+					PCGExMetaHelpers::GetAttributeIdentifier(Selector, InData)))
+				{
+					SourceDesc = Attr->GetAttributeDesc();
+				}
+			}
+		}
 
 		return bValid;
 	}
@@ -134,6 +130,39 @@ namespace PCGExData
 		}
 
 		return true;
+	}
+
+	bool FProxyDescriptor::Capture_Unsafe(FPCGExContext* InContext, const FPCGAttributePropertyInputSelector& InSelector, const EIOSide InSide, const EPCGMetadataTypes InKnownRealType, const FPCGMetadataAttributeDesc* InKnownSourceDesc)
+	{
+		const TSharedPtr<FFacade> InFacade = DataFacade.Pin();
+		check(InFacade);
+
+		// Trust the caller's type and side: no TryGetTypeAndSource probe.
+		Side = HasFlag(EProxyFlags::Constant) ? EIOSide::In : InSide;
+		RealType = InKnownRealType;
+
+		PointData = InFacade->Source->GetData(Side);
+		Selector = InSelector.CopyAndFixLast(InFacade->Source->GetData(Side));
+
+		UpdateSubSelection();
+		WorkingType = SubSelection.GetSubType(RealType);
+
+		// SourceDesc supplied by the caller -- skip the metadata lookup. Gate on attribute selection
+		// to mirror Capture(), which leaves SourceDesc default for point/extra-property selectors.
+		SourceDesc = FPCGMetadataAttributeDesc{};
+		if (InKnownSourceDesc && Selector.GetSelection() == EPCGAttributePropertySelection::Attribute)
+		{
+			SourceDesc = *InKnownSourceDesc;
+		}
+
+		return RealType != EPCGMetadataTypes::Unknown;
+	}
+
+	bool FProxyDescriptor::CaptureStrict_Unsafe(FPCGExContext* InContext, const FPCGAttributePropertyInputSelector& InSelector, const EIOSide InSide, const EPCGMetadataTypes InKnownRealType, const FPCGMetadataAttributeDesc* InKnownSourceDesc)
+	{
+		// The strict side-match guarantee is the caller's assertion in the unsafe path: the side is
+		// taken as given and never flipped, so this just forwards to Capture_Unsafe.
+		return Capture_Unsafe(InContext, InSelector, InSide, InKnownRealType, InKnownSourceDesc);
 	}
 
 	uint32 GetSelectorTypeHash(const FPCGAttributePropertyInputSelector& Selector)
@@ -203,12 +232,13 @@ namespace PCGExData
 		return RealType == InDescriptor.RealType && WorkingType == InDescriptor.WorkingType;
 	}
 
-	void IBufferProxy::SetSubSelection(const FSubSelection& InSubSelection)
+	void IBufferProxy::SetSubSelection(const FSubSelection& InSubSelection,
+	                                   const FPCGMetadataAttributeDesc* SourceDesc)
 	{
-		bWantsSubSelection = InSubSelection.bIsValid;
+		bWantsSubSelection = InSubSelection.HasSelection();
 		if (bWantsSubSelection)
 		{
-			CachedSubSelection.Initialize(InSubSelection, RealType, WorkingType);
+			CachedSubSelection.Initialize(InSubSelection, RealType, WorkingType, SourceDesc);
 		}
 	}
 
@@ -237,13 +267,38 @@ namespace PCGExData
 
 #undef PCGEX_CONVERTING_READ_IMPL
 
+	int32 IBufferProxy::GetValueSize() const
+	{
+		if (WorkingOps)
+		{
+			return WorkingOps->GetTypeSize();
+		}
+		return PCGExTypes::FScopedTypedValue::GetTypeSize(WorkingType);
+	}
+
+	int32 IBufferProxy::GetValueAlignment() const
+	{
+		if (WorkingOps)
+		{
+			return WorkingOps->GetTypeAlignment();
+		}
+		return 1;
+	}
+
 #pragma endregion
 
 	TSharedPtr<IBufferProxy> IBufferProxyPool::GetOrCreate(
 		const FProxyDescriptor& Descriptor,
 		TFunctionRef<TSharedPtr<IBufferProxy>()> Factory)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(IBufferProxyPool::GetOrCreate);
+
 		const uint64 Key = GetTypeHash(Descriptor);
+
+		// In-side descriptors read shared, stable upstream input: retain the proxy strongly so
+		// it survives for the pool owner's lifetime and is reused by every consumer. Out-side
+		// descriptors are this data's own transient output: keep them weak (die with the consumer).
+		const bool bRetain = Descriptor.Side == EIOSide::In;
 
 		// Read-locked fast path: cache hits proceed in parallel across threads.
 		// Critical for hot descriptors requested many times (e.g. shared blending
@@ -255,9 +310,9 @@ namespace PCGExData
 		// the TWeakPtr's two-pointer assignment, invalidating any pointer we'd held
 		// past the lock.
 		TSharedPtr<IBufferProxy> Pinned;
-		ProxyMap.ReadOrSkip(Key, [&](const TWeakPtr<IBufferProxy>& Slot)
+		ProxyMap.ReadOrSkip(Key, [&](const FProxyPoolEntry& Slot)
 		{
-			Pinned = Slot.Pin();
+			Pinned = Slot.Weak.Pin();
 		});
 		if (Pinned) { return Pinned; }
 
@@ -266,16 +321,21 @@ namespace PCGExData
 		TSharedPtr<IBufferProxy> Result;
 		ProxyMap.FindOrAddAndUpdate(
 			Key,
-			[&](TWeakPtr<IBufferProxy>& Slot)
+			[&](FProxyPoolEntry& Slot)
 			{
-				if (TSharedPtr<IBufferProxy> Pinned = Slot.Pin())
+				if (TSharedPtr<IBufferProxy> Existing = Slot.Weak.Pin())
 				{
-					Result = Pinned;
+					Result = Existing;
+					if (bRetain && !Slot.Strong) { Slot.Strong = Existing; }
 					return;
 				}
 
 				Result = Factory();
-				if (Result) { Slot = Result; }
+				if (Result)
+				{
+					Slot.Weak = Result;
+					if (bRetain) { Slot.Strong = Result; }
+				}
 			});
 		return Result;
 	}

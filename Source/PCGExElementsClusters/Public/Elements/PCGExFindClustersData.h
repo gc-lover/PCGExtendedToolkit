@@ -39,6 +39,13 @@ public:
 	{
 		return PCGEX_NODE_COLOR_OPTIN_NAME(FilterHub);
 	}
+	
+	virtual bool ShouldDrawNodeCompact() const override
+	{
+		return true;
+	}
+	
+	virtual bool GetCompactNodeIcon(FName& OutCompactNodeIcon) const override;
 #endif
 
 protected:
@@ -68,11 +75,11 @@ public:
 	EPCGExClusterDataSearchMode SearchMode = EPCGExClusterDataSearchMode::All;
 
 	/** Warning about inputs mismatch and triage */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable, ShowOnlyInnerProperties))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (ShowOnlyInnerProperties))
 	bool bSkipTrivialWarnings = false;
 
 	/** Warning that you'll get anyway if you try these inputs in a cluster node*/
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable, ShowOnlyInnerProperties))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (ShowOnlyInnerProperties))
 	bool bSkipImportantWarnings = false;
 };
 

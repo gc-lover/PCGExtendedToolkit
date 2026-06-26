@@ -7,6 +7,7 @@
 #include "Core/PCGExContext.h"
 #include "Data/PCGExPointIO.h"
 #include "Factories/PCGExFactoryData.h"
+#include "Helpers/PCGExStreamingHelpers.h"
 #include "Tasks/Task.h"
 
 #define LOCTEXT_NAMESPACE "PCGExFactoryProvider"
@@ -31,11 +32,7 @@ TArray<FPCGPinProperties> UPCGExFactoryProviderSettings::OutputPinProperties() c
 	TArray<FPCGPinProperties> PinProperties;
 
 	{
-#if PCGEX_ENGINE_VERSION > 506
 		FPCGPinProperties& Pin = PinProperties.Emplace_GetRef(GetMainOutputPin(), GetFactoryTypeId(), false, false);
-#else
-		FPCGPinProperties& Pin = PinProperties.Emplace_GetRef(GetMainOutputPin(), EPCGDataType::Param, false, false);
-#endif
 		PCGEX_PIN_TOOLTIP(GetMainOutputPin().ToString())
 		PCGEX_PIN_STATUS(Required)
 	}
@@ -77,6 +74,15 @@ bool FPCGExFactoryProviderElement::AdvanceWork(FPCGExContext* InContext, const U
 		}
 
 		Context->OutFactory->OutputConfigToMetadata();
+
+		{
+			PCGEX_MAKE_SHARED(AssetDeps, TSet<FSoftObjectPath>)			
+			Context->OutFactory->RegisterAssetDependencies(*AssetDeps.Get());
+			if (!AssetDeps->IsEmpty())
+			{
+				Context->OutFactory->AssetsDependencies = PCGExHelpers::LoadBlocking_AnyThread(AssetDeps);
+			}
+		}
 
 		if (Context->OutFactory->WantsPreparation(Context))
 		{
@@ -127,12 +133,10 @@ void FPCGExFactoryProviderElement::DisabledPassThroughData(FPCGContext* Context)
 	Context->OutputData.TaggedData.Empty();
 }
 
-#if PCGEX_ENGINE_VERSION > 506
 const FPCGDataTypeBaseId& UPCGExFactoryProviderSettings::GetFactoryTypeId() const
 {
 	return FPCGExFactoryDataTypeInfo::AsId();
 }
-#endif
 
 #undef LOCTEXT_NAMESPACE
 #undef PCGEX_NAMESPACE

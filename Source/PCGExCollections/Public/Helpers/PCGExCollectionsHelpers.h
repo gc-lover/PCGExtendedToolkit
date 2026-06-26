@@ -23,6 +23,7 @@ namespace PCGExDetails
 
 struct FPCGContext;
 struct FPCGMeshInstanceList;
+struct FPCGSkinnedMeshInstanceList;
 class UPCGBasePointData;
 class UPCGExSelectorFactoryData;
 class UPCGManagedActors;
@@ -159,9 +160,10 @@ namespace PCGExCollections
 		 * Get an entry for a specific point
 		 * @param PointIndex Index of the point
 		 * @param Seed Random seed for this point
+		 * @param bFlattenSubCollections
 		 * @return Access result containing entry and host collection
 		 */
-		FPCGExEntryAccessResult GetEntry(int32 PointIndex, int32 Seed) const;
+		FPCGExEntryAccessResult GetEntry(int32 PointIndex, int32 Seed, const bool bFlattenSubCollections = false) const;
 
 		/**
 		 * Get an entry with tag inheritance
@@ -169,9 +171,10 @@ namespace PCGExCollections
 		 * @param Seed Random seed for this point
 		 * @param TagInheritance Bitmask of EPCGExAssetTagInheritance flags
 		 * @param OutTags Set to append inherited tags to
+		 * @param bFlattenSubCollections
 		 * @return Access result containing entry and host collection
 		 */
-		FPCGExEntryAccessResult GetEntry(int32 PointIndex, int32 Seed, uint8 TagInheritance, TSet<FName>& OutTags) const;
+		FPCGExEntryAccessResult GetEntry(int32 PointIndex, int32 Seed, uint8 TagInheritance, TSet<FName>& OutTags, const bool bFlattenSubCollections = false) const;
 
 		/** Get the underlying collection */
 		UPCGExAssetCollection* GetCollection() const
@@ -344,10 +347,19 @@ namespace PCGExCollections
 		/** Unpack from a specific input pin */
 		void UnpackPin(FPCGContext* InContext, FName InPinLabel = NAME_None);
 
-		/** Build point partitions from point data */
-		bool BuildPartitions(const UPCGBasePointData* InPointData, TArray<FPCGMeshInstanceList>& InstanceLists);
+		/**
+		 * Build point partitions from point data.
+		 *
+		 * Templated on the instance-list type so the same partitioning logic works for both
+		 * static (FPCGMeshInstanceList) and skinned (FPCGSkinnedMeshInstanceList) selectors.
+		 * Field-name and PointData-type differences are absorbed by TInstanceListTraits<T>.
+		 * Explicit instantiations live in the .cpp for both built-in list types.
+		 */
+		template <typename T>
+		bool BuildPartitions(const UPCGBasePointData* InPointData, TArray<T>& InstanceLists);
 
-		void InsertEntry(const uint64 EntryHash, const int32 EntryIndex, TArray<FPCGMeshInstanceList>& InstanceLists);
+		template <typename T>
+		void InsertEntry(const uint64 EntryHash, const int32 EntryIndex, TArray<T>& InstanceLists);
 
 		/**
 		 * Resolve a packed hash to an entry

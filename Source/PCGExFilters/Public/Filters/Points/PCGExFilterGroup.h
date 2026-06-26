@@ -44,7 +44,7 @@ public:
 
 	virtual bool RegisterConsumableAttributes(FPCGExContext* InContext) const override;
 	virtual bool RegisterConsumableAttributesWithData(FPCGExContext* InContext, const UPCGData* InData) const override;
-	virtual void RegisterAssetDependencies(FPCGExContext* InContext) const override;
+	virtual void RegisterAssetDependencies(TSet<FSoftObjectPath>& InDependencies) const override;
 	virtual void RegisterBuffersDependencies(FPCGExContext* InContext, PCGExData::FFacadePreloader& FacadePreloader) const override;
 };
 
@@ -189,6 +189,11 @@ public:
 		return PCGEX_NODE_COLOR_OPTIN_NAME(FilterHub);
 	}
 
+	virtual bool ShouldDrawNodeCompact() const override
+	{
+		return bDrawAsCompactNode;
+	}
+	
 	virtual TArray<FPCGPreConfiguredSettingsInfo> GetPreconfiguredInfo() const override;
 #endif
 	//~End UPCGSettings
@@ -218,6 +223,10 @@ public:
 	/** Inverts the group output value. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, DisplayPriority=-1))
 	bool bInvert = false;
+	
+	/** Whether to draw this node as a compact node */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable), AdvancedDisplay)
+	bool bDrawAsCompactNode = true;
 };
 
 #pragma endregion

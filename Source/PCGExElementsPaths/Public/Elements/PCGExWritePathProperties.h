@@ -218,6 +218,10 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output - Path", meta=(DisplayName="Num Inside", PCG_Overridable, EditCondition="bWriteNumInside"))
 	FName NumInsideAttributeName = FName("@Data.NumInside");
 
+	/** Write a per-path 'Is Hole' flag attribute (true for odd inclusion-depth paths -- the standard even-odd hole rule). */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output - Path", meta=(PCG_NotOverridable))
+	bool bWriteIsHole = false;
+
 #pragma endregion
 
 #pragma region Points attributes
@@ -254,6 +258,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output - Points", meta=(DisplayName="DistanceToNext", PCG_Overridable, EditCondition="bWriteDistanceToNext"))
 	FName DistanceToNextAttributeName = FName("DistanceToNext");
 
+	/** Output normalized distance to next. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output - Points", meta=(PCG_NotOverridable, EditCondition="bWriteDistanceToNext", EditConditionHides, HideEditConditionToggle))
+	bool bNormalizeDistanceToNext = false;
 
 	/** Output distance to prev. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output - Points", meta=(PCG_NotOverridable, InlineEditConditionToggle))
@@ -375,6 +382,14 @@ public:
 	/** Median paths are inner with a depth %2 != 0 */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Tagging", meta=(PCG_Overridable, EditCondition="bTagOddInclusionDepth"))
 	FString OddInclusionDepthTag = TEXT("OddDepth");
+
+	/** . */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Tagging", meta=(PCG_NotOverridable, InlineEditConditionToggle))
+	bool bTagPairing = false;
+
+	/** Pairs each outer path with the holes directly inside it: an outer (even inclusion depth) and the holes it immediately encloses share a unique integer id -- the outer's collection index -- written as a "Prefix:Id" value tag. Nested odd/even stacks (outer/hole/outer/hole) split into separate groups. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Tagging", meta=(PCG_Overridable, EditCondition="bTagPairing"))
+	FString PairingTag = TEXT("PairingTag");
 
 	/** If enabled, will output data to additional pins. Note that all outputs are added to the default Path pin; extra pins contain a filtered list of the same data. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable))

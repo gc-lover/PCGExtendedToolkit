@@ -26,8 +26,12 @@ public class PCGExElementsClipper2 : ModuleRules
 				"PCGExCore",
 				"PCGExBlending",
 				"PCGExFilters",
+				"PCGExGraphs",
 				"PCGExMatching",
 				"PCGExFoundations",
+				"PCGExCollections", // FinalizeSpawnedActor / managed-actor spawn helpers (Clipper2 : Volume)
+				"PCGExElementsClusters", // UPCGExClusterNodesData / cluster labels (Clipper2 : Straight Skeleton)
+				"Chaos" // Clipper 2 Volume
 			}
 		);
 
@@ -36,5 +40,18 @@ public class PCGExElementsClipper2 : ModuleRules
 			{
 			}
 		);
+
+		if (Target.bBuildEditor)
+		{
+			// Editor-only: build a box render mesh on the persisted collision static mesh (Clipper2 : Volume,
+			// Primitive mode) so it cooks without a "Bad MeshDescription" error.
+			PrivateDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"MeshDescription",
+					"StaticMeshDescription"
+				}
+			);
+		}
 	}
 }

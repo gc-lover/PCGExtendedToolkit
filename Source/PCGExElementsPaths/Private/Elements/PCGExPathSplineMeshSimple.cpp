@@ -7,6 +7,7 @@
 #include "Components/SplineMeshComponent.h"
 
 #include "PCGExVersion.h"
+#include "Core/PCGExMT.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExDataTags.h"
 #include "Data/PCGExPointIO.h"
@@ -27,7 +28,7 @@ PCGEX_SETTING_VALUE_IMPL(UPCGExPathSplineMeshSimpleSettings, StartOffset, FVecto
 PCGEX_SETTING_VALUE_IMPL(UPCGExPathSplineMeshSimpleSettings, EndOffset, FVector2D, EndOffsetInput, EndOffsetAttribute, EndOffset)
 
 #if WITH_EDITOR
-void UPCGExPathSplineMeshSimpleSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExPathSplineMeshSimpleSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 70, 11)
 	{
@@ -35,7 +36,7 @@ void UPCGExPathSplineMeshSimpleSettings::ApplyDeprecation(UPCGNode* InOutNode)
 		Tangents.ApplyDeprecation(bApplyCustomTangents_DEPRECATED, ArriveTangentAttribute_DEPRECATED, LeaveTangentAttribute_DEPRECATED);
 	}
 
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 
 void UPCGExPathSplineMeshSimpleSettings::PostInitProperties()
@@ -72,8 +73,14 @@ UPCGExPathSplineMeshSimpleSettings::UPCGExPathSplineMeshSimpleSettings(const FOb
 void FPCGExPathSplineMeshSimpleContext::RegisterAssetDependencies()
 {
 	FPCGExPathProcessorContext::RegisterAssetDependencies();
-	if (StaticMeshLoader) { StaticMeshLoader->AddAssetDependencies(); }
-	if (MaterialLoader) { MaterialLoader->AddAssetDependencies(); }
+	if (StaticMeshLoader)
+	{
+		StaticMeshLoader->AddAssetDependencies();
+	}
+	if (MaterialLoader)
+	{
+		MaterialLoader->AddAssetDependencies();
+	}
 }
 
 bool FPCGExPathSplineMeshSimpleElement::Boot(FPCGExContext* InContext) const
@@ -142,7 +149,10 @@ void FPCGExPathSplineMeshSimpleElement::PostLoadAssetsDependencies(FPCGExContext
 
 bool FPCGExPathSplineMeshSimpleElement::PostBoot(FPCGExContext* InContext) const
 {
-	if (!FPCGExPathProcessorElement::PostBoot(InContext)) { return false; }
+	if (!FPCGExPathProcessorElement::PostBoot(InContext))
+	{
+		return false;
+	}
 
 	PCGEX_CONTEXT_AND_SETTINGS(PathSplineMeshSimple)
 	if (Context->StaticMeshLoader && Context->StaticMeshLoader->IsEmpty())
@@ -181,6 +191,9 @@ bool FPCGExPathSplineMeshSimpleElement::AdvanceWork(FPCGExContext* InContext, co
 		}
 	}
 
+	// Output spawns spline-mesh components and runs user functions -- illegal during a package save or GC (the batch's
+	// game-thread spawn loop and this block can be pumped mid-SavePackage). Defer the whole output phase.
+	PCGEX_DEFER_IF_OBJECT_WORK_BLOCKED
 	PCGEX_POINTS_BATCH_PROCESSING(PCGExCommon::States::State_Done)
 
 	PCGEX_OUTPUT_VALID_PATHS(MainPoints)

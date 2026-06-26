@@ -10,6 +10,7 @@
 #include "PCGExSettings.generated.h"
 
 class UPCGExInstancedFactory;
+struct FPCGExContext;
 
 UCLASS(Abstract, BlueprintType, ClassGroup = (Procedural))
 class PCGEXCORE_API UPCGExSettings : public UPCGSettings
@@ -25,11 +26,14 @@ public:
 	virtual void PCGExApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins);
 	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
 	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode);
 	virtual bool GetPinExtraIcon(const UPCGPin* InPin, FName& OutExtraIcon, FText& OutTooltip) const override;
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
 	virtual void PostLoad() override;
+	virtual void Serialize(FArchive& Ar) override;
+	virtual FGuid GetUserCustomVersionGuid() override;
 
 	virtual bool IsPinUsedByNodeExecution(const UPCGPin* InPin) const override;
 
@@ -115,9 +119,19 @@ public:
 #endif
 
 protected:
-	/** Store version of the node, used for deprecation purposes */
+	/**
+	 * Legacy per-object deprecation version. No longer the serialized source of truth -- the package
+	 * custom version (FPCGExCustomVersion, surfaced by the engine as UserDataVersion) is. Kept as a
+	 * UPROPERTY for one release so ResolveDataVersion() can bridge assets saved before the custom
+	 * version existed; the PCGEX_IF_VERSION_LOWER gates still read this field.
+	 */
 	UPROPERTY()
-	int64 PCGExDataVersion = -1;
+	int64 PCGExDataVersion = INDEX_NONE;
+
+#if WITH_EDITOR
+	/** Resolve PCGExDataVersion from the package custom version (UserDataVersion), bridging legacy assets. Called from Serialize on load. */
+	void ResolveDataVersion();
+#endif
 
 	virtual bool SupportsDataStealing() const;
 	virtual bool ShouldCache() const;

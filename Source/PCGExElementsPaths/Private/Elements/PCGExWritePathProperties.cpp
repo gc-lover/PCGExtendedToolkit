@@ -30,7 +30,7 @@ bool UPCGExWritePathPropertiesSettings::CanForwardData() const
 
 bool UPCGExWritePathPropertiesSettings::WantsInclusionHelper() const
 {
-	return bTagInner || bTagOuter || bTagOddInclusionDepth || bWriteNumInside || bWriteInclusionDepth || bUseInclusionPins;
+	return bTagInner || bTagOuter || bTagOddInclusionDepth || bWriteNumInside || bWriteInclusionDepth || bUseInclusionPins || bWriteIsHole || bTagPairing;
 }
 
 bool UPCGExWritePathPropertiesSettings::WriteAnyPathData() const
@@ -348,6 +348,19 @@ namespace PCGExWritePathProperties
 #undef PCGEX_OUTPUT_PATH_VALUE
 		}
 
+		// Pairing tag: give each outer and the holes directly nested inside it a shared id.
+		// An outer (even inclusion depth) uses its own collection index; a hole (odd depth)
+		// inherits its nearest enclosing outer's index, so odd/even stacks split into groups.
+		if (Settings->bTagPairing && Context->InclusionHelper)
+		{
+			if (PCGExPaths::FInclusionInfos Infos; Context->InclusionHelper->Find(Path->Idx, Infos))
+			{
+				const bool bIsOuter = Infos.Depth % 2 == 0;
+				const int32 PairingId = (bIsOuter || Infos.ParentIdx == -1) ? Path->Idx : Infos.ParentIdx;
+				PointIO->Tags->Set<int32>(Settings->PairingTag, PairingId);
+			}
+		}
+
 		///
 
 		if (Path->ConvexitySign != 0)
@@ -373,6 +386,13 @@ namespace PCGExWritePathProperties
 		if (PathAttributeSet && !Context->PathAttributeSet)
 		{
 			Context->StageOutput(PathAttributeSet, OutputPathProperties, PCGExData::EStaging::None, FlattenedTags);
+		}
+
+		// A hole is a path at ODD inclusion depth (even-odd rule); depth 0 (outer) and even depths are not holes.
+		if (Settings->bWriteIsHole && Context->InclusionHelper)
+		{
+			PCGExPaths::FInclusionInfos HoleInfos;
+			PCGExPaths::Helpers::SetIsHole(PointDataFacade->Source, Context->InclusionHelper->Find(Path->Idx, HoleInfos) && HoleInfos.bOdd);
 		}
 
 		if (PCGExPaths::FInclusionInfos Infos;

@@ -34,18 +34,21 @@
 #pragma region UPCGExAssetStagingSettings
 
 #if WITH_EDITOR
-void UPCGExAssetStagingSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExAssetStagingSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
 {
-	PCGEX_IF_VERSION_LOWER(1, 75, 11)
+	// Resolve the deferred selector default ONCE, and only while still Unset so explicit user choices
+	// are never overwritten. Nodes predating the Unset default (< 1.75.19) keep the legacy inline
+	// behavior; newer nodes adopt the external-factory default. PCGExDataVersion is resolved in Serialize.
+	if (SelectorMode == EPCGExSelectorMode::Unset)
 	{
-		if (!bSelectorModePreUpdated)
+		SelectorMode = EPCGExSelectorMode::External;
+		PCGEX_IF_VERSION_LOWER(1, 75, 19)
 		{
 			SelectorMode = EPCGExSelectorMode::Legacy;
-			bSelectorModePreUpdated = true; // So we don't override the value for folks who'll update in their own time
 		}
 	}
 
-	Super::ApplyDeprecation(InOutNode);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
 }
 
 void UPCGExAssetStagingSettings::PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)
@@ -57,7 +60,7 @@ void UPCGExAssetStagingSettings::PostEditChangeProperty(struct FPropertyChangedE
 
 bool UPCGExAssetStagingSettings::IsPinUsedByNodeExecution(const UPCGPin* InPin) const
 {
-	if (InPin->Properties.Label == PCGExCollections::Labels::SourceSelectorLabel && SelectorMode != EPCGExSelectorMode::External)
+	if (InPin->Properties.Label == PCGExCollections::Labels::SourceSelectorLabel && SelectorMode == EPCGExSelectorMode::Legacy)
 	{
 		return false;
 	}
@@ -85,7 +88,7 @@ void UPCGExAssetStagingSettings::InputPinPropertiesBeforeFilters(TArray<FPCGPinP
 		PCGEX_PIN_PARAM(PCGExCollections::Labels::SourceAssetCollection, "Attribute set to be used as collection.", Required)
 	}
 
-	if (SelectorMode == EPCGExSelectorMode::External)
+	if (SelectorMode != EPCGExSelectorMode::Legacy)
 	{
 		PCGEX_PIN_FACTORY(PCGExCollections::Labels::SourceSelectorLabel, "External selector factory driving entry picks.", Required, FPCGExDataTypeInfoSelector::AsId())
 	}
@@ -163,7 +166,7 @@ bool FPCGExAssetStagingElement::Boot(FPCGExContext* InContext) const
 		PCGEX_VALIDATE_NAME(Settings->EntryTypeAttributeName)
 	}
 
-	if (Settings->SelectorMode == EPCGExSelectorMode::External)
+	if (Settings->SelectorMode != EPCGExSelectorMode::Legacy)
 	{
 		TArray<TObjectPtr<const UPCGExSelectorFactoryData>> Factories;
 		if (!PCGExFactories::GetInputFactories<UPCGExSelectorFactoryData>(Context, PCGExCollections::Labels::SourceSelectorLabel, Factories, {PCGExFactories::EType::Selector}))
@@ -557,12 +560,15 @@ namespace PCGExAssetStaging
 
 		const bool bLocalApplyFitting = bApplyFitting;
 		const bool bLocalOutputWeight = bOutputWeight;
+		const bool bFlattenSubCollections = Settings->bFlattenSubCollections;
+		const bool bConsiderEntryScaleToFit = Settings->bConsiderEntryScaleToFit;
+		const bool bConsiderEntryJustification = Settings->bConsiderEntryJustification;
 		UPCGBasePointData* OutPointData = PointDataFacade->GetOut();
 
-		const TPCGValueRange<FTransform> OutTransforms = OutPointData->GetTransformValueRange(false);
+		const TPCGValueRange<FTransform> OutTransforms = bLocalApplyFitting ? OutPointData->GetTransformValueRange(false) : TPCGValueRange<FTransform>();
 		const TPCGValueRange<FVector> OutBoundsMin = bLocalApplyFitting ? OutPointData->GetBoundsMinValueRange(false) : TPCGValueRange<FVector>();
 		const TPCGValueRange<FVector> OutBoundsMax = bLocalApplyFitting ? OutPointData->GetBoundsMaxValueRange(false) : TPCGValueRange<FVector>();
-		const TConstPCGValueRange<int32> Seeds = OutPointData->GetConstSeedValueRange();
+		const TConstPCGValueRange<int32> Seeds = PointDataFacade->GetIn()->GetConstSeedValueRange();
 		const TPCGValueRange<float> Densities = bUsesDensity ? OutPointData->GetDensityValueRange(false) : TPCGValueRange<float>();
 
 		int32 LocalNumInvalid = 0;
@@ -634,7 +640,7 @@ namespace PCGExAssetStaging
 
 			const int32 Seed = PCGExRandomHelpers::GetSeed(Seeds[Index], Helper->Details.SeedComponents, Helper->Details.LocalSeed, Settings, Component);
 
-			FPCGExEntryAccessResult Result = Helper->GetEntry(Index, Seed);
+			FPCGExEntryAccessResult Result = Helper->GetEntry(Index, Seed, bFlattenSubCollections);
 
 			if (!Result.IsValid()
 				|| !Result.Entry->Staging.Bounds.IsValid
@@ -707,9 +713,19 @@ namespace PCGExAssetStaging
 
 				FTransform& OutTransform = OutTransforms[Index];
 				FVector OutTranslation = FVector::ZeroVector;
-				FBox OutBounds = Entry->Staging.Bounds;
+				FBox OutBounds = Entry->Staging.AlteredBounds;
 
 				const FPCGExFittingVariations& EntryVariations = Entry->GetVariations(EntryHost);
+
+				PCGExFitting::FOverridesView EntryOverrides;
+				if (bConsiderEntryScaleToFit)
+				{
+					EntryOverrides.ScaleToFit = Entry->GetScaleToFitOverride(EntryHost);
+				}
+				if (bConsiderEntryJustification)
+				{
+					EntryOverrides.Justification = Entry->GetJustificationOverride(EntryHost);
+				}
 
 				RandomSource.Initialize(PCGExRandomHelpers::GetSeed(Seed, Variations.Seed));
 
@@ -719,11 +735,11 @@ namespace PCGExAssetStaging
 				{
 					FTransform LocalXForm = FTransform::Identity;
 					Variations.Apply(RandomSource, LocalXForm, EntryVariations, EPCGExVariationMode::Before);
-					FittingHandler.ComputeLocalTransform(Index, LocalXForm, OutTransform, OutBounds, OutTranslation);
+					FittingHandler.ComputeLocalTransform(Index, LocalXForm, OutTransform, OutBounds, OutTranslation, EntryOverrides);
 				}
 				else
 				{
-					FittingHandler.ComputeTransform(Index, OutTransform, OutBounds, OutTranslation);
+					FittingHandler.ComputeTransform(Index, OutTransform, OutBounds, OutTranslation, true, EntryOverrides);
 				}
 
 				if (TranslationWriter)

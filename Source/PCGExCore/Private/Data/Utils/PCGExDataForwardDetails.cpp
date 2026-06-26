@@ -14,7 +14,7 @@ void FPCGExForwardDetails::Filter(TArray<PCGExData::FAttributeIdentity>& Identit
 {
 	for (int i = 0; i < Identities.Num(); i++)
 	{
-		if (!Test(Identities[i].Identifier.Name.ToString()))
+		if (!Test(Identities[i].Name.ToString()))
 		{
 			Identities.RemoveAt(i);
 			i--;
@@ -44,31 +44,63 @@ TSharedPtr<PCGExData::FDataForwardHandler> FPCGExForwardDetails::TryGetHandler(c
 
 bool FPCGExAttributeToTagDetails::Init(const FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& InSourceFacade, const TSet<FName>* IgnoreAttributes)
 {
-	PCGExMetaHelpers::AppendUniqueSelectorsFromCommaSeparatedList(CommaSeparatedAttributeSelectors, Attributes);
-
-	Getters.Reserve(Attributes.Num());
-	for (FPCGAttributePropertyInputSelector& Selector : Attributes)
+	// Single-fetch on the facade's input is identical to the raw-data path (MakeBroadcaster just forwards
+	// Source->GetIn()), so reuse it and only attach the facade afterwards for SourceDataFacade readers.
+	if (!Init(InContext, InSourceFacade->Source->GetIn(), IgnoreAttributes))
 	{
-		if (IgnoreAttributes)
-		{
-			if (IgnoreAttributes->Contains(Selector.GetAttributeName()))
-			{
-				continue;
-			}
-		}
-
-		const TSharedPtr<PCGExData::IAttributeBroadcaster>& Getter = PCGExData::MakeBroadcaster(Selector, InSourceFacade->Source, true);
-		if (!Getter)
-		{
-			PCGEX_LOG_INVALID_SELECTOR_C(InContext, Tag, Selector)
-			continue;
-		}
-
-		Getters.Add(Getter);
+		return false;
 	}
 
 	SourceDataFacade = InSourceFacade;
 	return true;
+}
+
+bool FPCGExAttributeToTagDetails::Init(const FPCGExContext* InContext, const UPCGData* InSourceData, const TSet<FName>* IgnoreAttributes)
+{
+	Getters.Reserve(AttributeMappings.Num());
+	GetterNames.Reserve(AttributeMappings.Num());
+
+	// GetterNames stays index-aligned with Getters; NAME_None => Tag() uses Getter->GetName().
+	auto AddGetter = [&](const FPCGAttributePropertyInputSelector& Selector, const FName OutputNameOverride)
+	{
+		if (IgnoreAttributes && IgnoreAttributes->Contains(Selector.GetAttributeName())) { return; }
+
+		const TSharedPtr<PCGExData::IAttributeBroadcaster> Getter = PCGExData::MakeBroadcaster(Selector, InSourceData);
+		if (!Getter)
+		{
+			PCGEX_LOG_INVALID_SELECTOR_C(InContext, Tag, Selector)
+			return;
+		}
+
+		Getters.Add(Getter);
+		GetterNames.Add(OutputNameOverride);
+	};
+
+	for (const FPCGExAttributeSourceToTargetDetails& Mapping : AttributeMappings)
+	{
+		AddGetter(Mapping.GetSourceSelector(), Mapping.WantsRemappedOutput() ? Mapping.GetOutputName() : NAME_None);
+	}
+
+	// Comma-separated additions are never remapped (output keeps the resolved source name).
+	TArray<FPCGAttributePropertyInputSelector> ExtraSelectors;
+	PCGExMetaHelpers::AppendUniqueSelectorsFromCommaSeparatedList(CommaSeparatedAttributeSelectors, ExtraSelectors);
+	for (const FPCGAttributePropertyInputSelector& Selector : ExtraSelectors) { AddGetter(Selector, NAME_None); }
+
+	// Raw-data path: no facade is involved, so SourceDataFacade stays null.
+	return true;
+}
+
+void FPCGExAttributeToTagDetails::PostSerialize(const FArchive& Ar)
+{
+#if WITH_EDITOR
+	// One-shot migration for every embedder. The (new-empty AND deprecated-non-empty) guard avoids clobbering
+	// post-migration edits; clearing the source stops an emptied AttributeMappings from resurrecting old entries.
+	if (Ar.IsLoading() && AttributeMappings.IsEmpty() && !Attributes_DEPRECATED.IsEmpty())
+	{
+		PCGExAttributeMigration::AppendMappingsFromSelectors(Attributes_DEPRECATED, AttributeMappings);
+		Attributes_DEPRECATED.Empty();
+	}
+#endif
 }
 
 void FPCGExAttributeToTagDetails::Tag(const PCGExData::FConstPoint& TagSource, TSet<FString>& InTags) const
@@ -80,8 +112,11 @@ void FPCGExAttributeToTagDetails::Tag(const PCGExData::FConstPoint& TagSource, T
 
 	if (!Getters.IsEmpty())
 	{
-		for (const TSharedPtr<PCGExData::IAttributeBroadcaster>& Getter : Getters)
+		for (int32 i = 0; i < Getters.Num(); i++)
 		{
+			const TSharedPtr<PCGExData::IAttributeBroadcaster>& Getter = Getters[i];
+			const FName OutputName = !GetterNames[i].IsNone() ? GetterNames[i] : Getter->GetName();
+
 			PCGExMetaHelpers::ExecuteWithRightType(Getter->GetMetadataType(), [&](auto DummyValue)
 			{
 				using T = decltype(DummyValue);
@@ -91,32 +126,13 @@ void FPCGExAttributeToTagDetails::Tag(const PCGExData::FConstPoint& TagSource, T
 					return;
 				}
 
-				const FString Prefix = TypedGetter->GetName().ToString();
-
 				T TypedValue = T{};
 				if (!TypedGetter->TryFetchSingle(TagSource, TypedValue))
 				{
 					return;
 				}
 
-				if constexpr (std::is_same_v<T, bool>)
-				{
-					// Booleans tag by presence: add the attribute name when true, omit when false.
-					if (TypedValue)
-					{
-						InTags.Add(Prefix);
-					}
-				}
-				else
-				{
-					FString StringValue = PCGExTypeOps::Convert<T, FString>(TypedValue);
-					if (StringValue.IsEmpty())
-					{
-						return;
-					}
-
-					InTags.Add(bPrefixWithAttributeName ? (Prefix + TEXT(":") + StringValue) : StringValue);
-				}
+				AppendValueTag<T>(OutputName, TypedValue, bPrefixWithAttributeName, InTags);
 			});
 		}
 	}
@@ -143,18 +159,22 @@ void FPCGExAttributeToTagDetails::Tag(const PCGExData::FConstPoint& TagSource, U
 
 	if (!Getters.IsEmpty())
 	{
-		for (const TSharedPtr<PCGExData::IAttributeBroadcaster>& Getter : Getters)
+		for (int32 i = 0; i < Getters.Num(); i++)
 		{
+			const TSharedPtr<PCGExData::IAttributeBroadcaster>& Getter = Getters[i];
+			const FName OutputName = !GetterNames[i].IsNone() ? GetterNames[i] : Getter->GetName();
+
 			PCGExMetaHelpers::ExecuteWithRightType(Getter->GetMetadataType(), [&](auto DummyValue)
 			{
 				using T = decltype(DummyValue);
 				TSharedPtr<PCGExData::TAttributeBroadcaster<T>> TypedGetter = StaticCastSharedPtr<PCGExData::TAttributeBroadcaster<T>>(Getter);
+
 				if (!TypedGetter)
 				{
 					return;
 				}
 
-				const FPCGAttributeIdentifier Identifier = FPCGAttributeIdentifier(Getter->GetName(), PCGMetadataDomainID::Data);
+				const FPCGAttributeIdentifier Identifier = FPCGAttributeIdentifier(OutputName, PCGMetadataDomainID::Data);
 				InMetadata->DeleteAttribute(Identifier);
 				InMetadata->FindOrCreateAttribute<T>(Identifier, TypedGetter->FetchSingle(TagSource, T{}));
 			});

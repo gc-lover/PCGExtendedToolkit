@@ -5,7 +5,6 @@
 
 #include "Engine/World.h"
 #include "Misc/PackageName.h"
-#include "Serialization/ArchiveCrc32.h"
 #include "UObject/ObjectSaveContext.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -27,6 +26,7 @@
 #include "Data/PCGPointArrayData.h"
 #include "Data/PCGSpatialData.h"
 #include "Engine/Level.h"
+#include "Helpers/PCGExCollectionSortKeys.h"
 #include "Helpers/PCGExCollectionsHelpers.h"
 #include "Helpers/PCGExDefaultLevelDataExporter.h"
 #include "Helpers/PCGExLevelDataExporter.h"
@@ -142,12 +142,15 @@ void FPCGExPCGDataAssetCollectionEntry::UpdateStaging(const UPCGExAssetCollectio
 		}
 		ExportedDataAsset = NewObject<UPCGDataAsset>(const_cast<UPCGExAssetCollection*>(OwningCollection));
 
-		// Use collection's instanced exporter if available, otherwise create a transient default
+		// Use collection's instanced exporter if available, otherwise create a transient default.
+		// The instanced exporter is editor-only data; cooked builds always take the fallback path.
 		UPCGExLevelDataExporter* Exporter = nullptr;
+#if WITH_EDITORONLY_DATA
 		if (const UPCGExPCGDataAssetCollection* TypedCollection = Cast<UPCGExPCGDataAssetCollection>(OwningCollection))
 		{
 			Exporter = TypedCollection->LevelExporter;
 		}
+#endif
 
 		TObjectPtr<UPCGExLevelDataExporter> FallbackExporter;
 		if (!Exporter)
@@ -591,6 +594,14 @@ namespace PCGExSharedCompact
 	// Policies + CompactShared reference Editor* fields on FPCGExPCGDataAssetCollectionEntry
 	// which are themselves WITH_EDITORONLY_DATA. Their callers (CompactSharedMesh /
 	// CompactSharedLevel) are body-guarded the same way.
+	//
+	// SortKey implementations live in Helpers/PCGExCollectionSortKeys.{h,cpp} as free
+	// functions so they're directly testable from PCGExtendedToolkitTest. FArchiveBlake3
+	// (the process-stable Blake3 archive that backs the descriptor digest) is exposed in
+	// Helpers/PCGExArchiveBlake3.h. The full SortKey contract -- process-stable, fully
+	// discriminating, leading-field stable on mesh path -- is documented on the header
+	// declarations.
+
 	// --- Policy structs supplying entry-specific knowledge to CompactShared<>. ---
 	struct FMeshPolicy
 	{
@@ -612,49 +623,9 @@ namespace PCGExSharedCompact
 			return MeshContentEquals(A, B);
 		}
 
-		// Process-stable ordering key. MUST NOT derive from GetTypeHash(FName/FSoftObjectPath):
-		// those hash the per-process FName comparison index (FNameEntryId::ToUnstableInt), which
-		// is assigned in name-registration order and therefore differs between editor sessions and
-		// the cooker. Using such a hash as a sort key reshuffles the shared collection every run,
-		// which silently re-points every baked Tag_EntryIdx (a raw Entries index) at a different
-		// mesh. Every ingredient below is either a raw scalar or a string / FArchiveCrc32 hash
-		// (FArchiveCrc32 stringifies FName & UObject paths), so the key is identical in any process.
-		//
-		// The key must also fully discriminate everything MeshContentEquals compares, so two
-		// distinct entries can never collide to the same key (which would re-introduce an unstable
-		// tie-break): mesh path, material-variant mode, slot, descriptor source, property-component
-		// hash, both component descriptors (CRC), and the material-override variant lists.
 		static FString SortKey(const FPCGExMeshCollectionEntry& E)
 		{
-			FArchiveCrc32 DescriptorCrc;
-			FSoftISMComponentDescriptor::StaticStruct()->SerializeBin(
-				DescriptorCrc, const_cast<FSoftISMComponentDescriptor*>(&E.ISMDescriptor));
-			FPCGExStaticMeshComponentDescriptor::StaticStruct()->SerializeBin(
-				DescriptorCrc, const_cast<FPCGExStaticMeshComponentDescriptor*>(&E.SMDescriptor));
-
-			FString Key = E.StaticMesh.ToSoftObjectPath().ToString();
-			Key += FString::Printf(TEXT("|MV=%d|SI=%d|DS=%d|PCH=%u|DESC=%08X"),
-				static_cast<int32>(E.MaterialVariants),
-				E.SlotIndex,
-				static_cast<int32>(E.DescriptorSource),
-				E.PropertyComponentHash,
-				DescriptorCrc.GetCrc());
-
-			for (const FPCGExMaterialOverrideSingleEntry& S : E.MaterialOverrideVariants)
-			{
-				Key += FString::Printf(TEXT("|MOV=%d:%s"),
-					S.Weight, *S.Material.ToSoftObjectPath().ToString());
-			}
-			for (const FPCGExMaterialOverrideCollection& V : E.MaterialOverrideVariantsList)
-			{
-				Key += FString::Printf(TEXT("|MOL=%d"), V.Weight);
-				for (const FPCGExMaterialOverrideEntry& O : V.Overrides)
-				{
-					Key += FString::Printf(TEXT(",%d:%s"),
-						O.SlotIndex, *O.Material.ToSoftObjectPath().ToString());
-				}
-			}
-			return Key;
+			return ::PCGExSharedCompact::MeshSortKey(E);
 		}
 
 		static const TArray<FPCGExMeshCollectionEntry>& Contributions(const FPCGExPCGDataAssetCollectionEntry& E)
@@ -702,7 +673,7 @@ namespace PCGExSharedCompact
 
 		static FString SortKey(const FPCGExLevelCollectionEntry& E)
 		{
-			return E.Level.ToSoftObjectPath().ToString();
+			return ::PCGExSharedCompact::LevelSortKey(E);
 		}
 
 		static const TArray<FPCGExLevelCollectionEntry>& Contributions(const FPCGExPCGDataAssetCollectionEntry& E)

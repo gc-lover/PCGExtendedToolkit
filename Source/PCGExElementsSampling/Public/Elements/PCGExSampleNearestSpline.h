@@ -129,7 +129,8 @@ public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
 	virtual void PCGExApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS(SampleNearestSpline, "Sample : Nearest Spline", "Find the closest transform on nearest polylines.");
 
@@ -140,6 +141,7 @@ public:
 #endif
 
 protected:
+	virtual FName GetMainInputPin() const override;
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
 	virtual FPCGElementPtr CreateElement() const override;
 	//~End UPCGSettings
@@ -165,22 +167,22 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RangeMinInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RangeMinAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RangeMin_DEPRECATED = 0;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RangeMaxInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RangeMaxAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RangeMax_DEPRECATED = 300;
 
 #pragma endregion
@@ -209,13 +211,13 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType SampleAlphaInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector SampleAlphaAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double SampleAlphaConstant_DEPRECATED = 0.5;
 
 #pragma endregion

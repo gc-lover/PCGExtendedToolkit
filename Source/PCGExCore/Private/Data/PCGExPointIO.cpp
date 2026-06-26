@@ -3,6 +3,7 @@
 
 #include "Data/PCGExPointIO.h"
 
+#include "PCGExLog.h"
 #include "PCGParamData.h"
 #include "Core/PCGExContext.h"
 #include "Data/PCGExDataTags.h"
@@ -228,47 +229,7 @@ namespace PCGExData
 		UPCGMetadata* Metadata = Out->Metadata;
 		TPCGValueRange<int64> MetadataEntries = Out->GetMetadataEntryValueRange(true);
 
-		if (bConservative)
-		{
-			// Conservative: only allocate new metadata entries for points that don't
-			// already have valid keys (invalid or stale parent references). This preserves
-			// existing metadata entries, which is important when the output was duplicated
-			// from input and some points already carry valid attribute data.
-			TArray<int64*> KeysNeedingInit;
-			KeysNeedingInit.Reserve(MetadataEntries.Num());
-			const int64 ItemKeyOffset = Metadata->GetItemKeyCountForParent();
-
-			for (int64& Key : MetadataEntries)
-			{
-				if (Key == PCGInvalidEntryKey || Key < ItemKeyOffset)
-				{
-					KeysNeedingInit.Add(&Key);
-				}
-			}
-
-			if (KeysNeedingInit.Num() > 0)
-			{
-				Metadata->AddEntriesInPlace(KeysNeedingInit);
-			}
-		}
-		else
-		{
-			// Non-conservative: replace ALL metadata entries with fresh ones.
-			// Old keys are preserved as parent references in DelayedEntries so attribute
-			// values can still be inherited/interpolated from the original data.
-			const int32 NumEntries = MetadataEntries.Num();
-			TArray<TTuple<int64, int64>> DelayedEntries;
-			DelayedEntries.SetNum(NumEntries);
-
-			for (int i = 0; i < NumEntries; i++)
-			{
-				int64 OldKey = MetadataEntries[i];
-				MetadataEntries[i] = Metadata->AddEntryPlaceholder();
-				DelayedEntries[i] = MakeTuple(MetadataEntries[i], OldKey);
-			}
-
-			Metadata->AddDelayedEntries(DelayedEntries);
-		}
+		PCGExMetaHelpers::InitializeMetadataEntries(Out->Metadata, Out->GetMetadataEntryValueRange(true), bConservative);
 	}
 
 	TSharedPtr<IPCGAttributeAccessorKeys> FPointIO::GetInKeys()
@@ -540,8 +501,14 @@ namespace PCGExData
 
 	void FPointIO::ClearCachedKeys()
 	{
-		InKeys.Reset();
-		OutKeys.Reset();
+		{
+			FWriteScopeLock WriteScopeLock(InKeysLock);
+			InKeys.Reset();
+		}
+		{
+			FWriteScopeLock WriteScopeLock(OutKeysLock);
+			OutKeys.Reset();
+		}
 	}
 
 	FPointIO::~FPointIO()
@@ -782,7 +749,7 @@ for (int i = 0; i < ReducedNum; i++){Range[i] = Range[InIndices[i]];}}
 #pragma region FPointIOCollection
 
 	FPointIOCollection::FPointIOCollection(FPCGExContext* InContext, const bool bIsTransactional)
-		: ContextHandle(InContext->GetOrCreateHandle())
+		: ContextHandle(InContext->GetWeakSelfHandle())
 		  , bTransactional(bIsTransactional)
 	{
 	}

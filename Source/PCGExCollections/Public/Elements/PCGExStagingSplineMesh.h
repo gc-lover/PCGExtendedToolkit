@@ -55,7 +55,8 @@ public:
 
 	//~Begin UPCGSettings
 #if WITH_EDITOR
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS(PathSplineMesh, "Staging : Spline Mesh", "Create spline mesh components from paths using asset collections.");
 
@@ -103,13 +104,7 @@ public:
 	 * Legacy uses the inline settings below -- only set for legacy nodes.
 	 * External uses a factory on the Selector input pin. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable), AdvancedDisplay)
-	EPCGExSelectorMode SelectorMode = EPCGExSelectorMode::Legacy;
-
-#if WITH_EDITORONLY_DATA
-	// TODO : remove in 0.76
-	UPROPERTY()
-	bool bSelectorModePreUpdated = false;
-#endif
+	EPCGExSelectorMode SelectorMode = EPCGExSelectorMode::External;
 
 	/** Distribution details
 	 * Note : LEGACY Nodes only. */
@@ -123,16 +118,16 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bApplyCustomTangents_DEPRECATED = false;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName ArriveTangentAttribute_DEPRECATED = "ArriveTangent";
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName LeaveTangentAttribute_DEPRECATED = "LeaveTangent";
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExMinimalAxis SplineMeshAxisConstant_DEPRECATED = EPCGExMinimalAxis::X;
 
 #pragma endregion

@@ -14,7 +14,7 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
-#include "StructUtils/InstancedStruct.h"
+
 #include "Core/PCGExAssetCollection.h"
 #include "Details/Collections/FPCGExCollectionTileDragDropOp.h"
 #include "Details/Collections/PCGExAssetCollectionEditor.h"
@@ -23,6 +23,7 @@
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "Misc/TransactionObjectEvent.h"
 #include "Modules/ModuleManager.h"
+#include "StructUtils/InstancedStruct.h"
 #include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/SBoxPanel.h"
@@ -591,6 +592,18 @@ void SPCGExCollectionGridView::RefreshGrid()
 void SPCGExCollectionGridView::RefreshDetailPanel()
 {
 	UpdateDetailForSelection();
+
+	// Only reached on filter toggles (ForceRefreshTabs). UpdateDetailForSelection's same-type
+	// SetStructureData may rebind values onto the cached layout without re-running the entry
+	// customization, leaving the build-time property filter stale -- ForceRefresh guarantees the
+	// rebuild, matching the explicit ForceRefresh the tab detail views already get.
+	if (StructDetailView.IsValid())
+	{
+		if (IDetailsView* Inner = StructDetailView->GetDetailsView())
+		{
+			Inner->ForceRefresh();
+		}
+	}
 }
 
 TArray<int32> SPCGExCollectionGridView::GetSelectedIndices() const

@@ -85,6 +85,7 @@ void PCGExWaitForPCGData::FGenerationConfig::InitFrom(const UPCGExWaitForPCGData
 	GenerateOnLoadAction = Settings->GenerateOnLoadAction;
 	GenerateOnDemandAction = Settings->GenerateOnDemandAction;
 	GenerateAtRuntimeAction = Settings->GenerateAtRuntime;
+	bTrackSourceComponents = Settings->bTrackSourceComponents;
 }
 
 void PCGExWaitForPCGData::FOutputConfig::InitFrom(const UPCGExWaitForPCGDataSettings* Settings)
@@ -124,6 +125,32 @@ void UPCGExWaitForPCGDataSettings::PostEditChangeProperty(FPropertyChangedEvent&
 		EDITOR_RefreshPins();
 	}
 }
+
+void UPCGExWaitForPCGDataSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+
+	PCGEX_IF_VERSION_LOWER(1, 76, 0)
+	{
+		// The old `CachedPins` member was renamed to `CachedPinsEx` because PCG 5.8
+		// introduced a same-named member on the base settings that shadowed ours.
+		CachedPinsEx.Reset();
+		for (const TObjectPtr<UPCGPin>& Pin : OutputPins)
+		{
+			if (!Pin) { continue; }
+			const FName Label = Pin->Properties.Label;
+			
+			{
+				// Known already, skip
+				if (Label == PCGPinConstants::DefaultExecutionDependencyLabel) { continue; }
+				if (bOutputRoaming && Label == RoamingPin) { continue; }
+			}
+			
+			CachedPinsEx.Add(Pin->Properties);
+		}
+	}
+
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
 #endif
 
 bool UPCGExWaitForPCGDataSettings::IsPinUsedByNodeExecution(const UPCGPin* InPin) const
@@ -143,7 +170,7 @@ TArray<FPCGPinProperties> UPCGExWaitForPCGDataSettings::OutputPinProperties() co
 		PCGEX_PIN_ANY(RoamingPin, "Roaming data that isn't part of the template output but still exists.", Normal)
 	}
 
-	PinProperties.Append(CachedTargetPins);
+	PinProperties.Append(CachedPinsEx);
 
 	return PinProperties;
 }
@@ -153,7 +180,7 @@ void UPCGExWaitForPCGDataSettings::EDITOR_RefreshPins()
 {
 	Modify(true);
 
-	GetTargetGraphPins(CachedTargetPins); // Force-refresh cached pins
+	GetTargetGraphPins(CachedPinsEx); // Force-refresh cached pins
 
 	FPropertyChangedEvent EmptyEvent(nullptr);
 	PostEditChangeProperty(EmptyEvent);
@@ -235,7 +262,7 @@ bool FPCGExWaitForPCGDataElement::Boot(FPCGExContext* InContext) const
 		PCGEX_VALIDATE_NAME(Settings->TemplateGraphAttributeName)
 	}
 
-	for (FPCGPinProperties Pin : Settings->CachedTargetPins)
+	for (FPCGPinProperties Pin : Settings->CachedPinsEx)
 	{
 		Context->AllLabels.Add(Pin.Label);
 
@@ -622,7 +649,10 @@ namespace PCGExWaitForPCGData
 		// Notify about found components
 		for (UPCGComponent* PCGComponent : FoundComponents)
 		{
-			Context->EDITOR_TrackPath(PCGComponent);
+			if (Context->GenerationConfig.bTrackSourceComponents)
+			{
+				Context->EDITOR_TrackPCGComponentData(PCGComponent);
+			}
 			if (OnComponentFound)
 			{
 				OnComponentFound(PCGComponent);
@@ -909,7 +939,8 @@ namespace PCGExWaitForPCGData
 
 		Watcher = MakeShared<FGenerationWatcher>(
 			TaskManager,
-			Context->GenerationConfig);
+			Context->GenerationConfig,
+			Context->GetMutableComponent());
 		Watcher->Initialize();
 
 		Stager = MakeShared<FDataStager>(

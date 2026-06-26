@@ -33,7 +33,7 @@ class UPCGExFilterVtxSettings : public UPCGExClustersProcessorSettings
 public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS(FilterVtx, "Cluster : Filter Vtx", "Filter out vtx from clusters.");
 
@@ -86,7 +86,7 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName ResultAttributeName_DEPRECATED = NAME_None;
 
 #pragma endregion

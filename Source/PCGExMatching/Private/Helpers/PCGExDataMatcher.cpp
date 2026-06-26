@@ -382,6 +382,8 @@ namespace PCGExMatching
 		const TArray<FPCGExTaggedData>& InCandidates,
 		TSet<const UPCGData*>& OutExclude) const
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(FDataMatcher::BuildPerPointExclude);
+
 		InPoint.IO = 0; // Single MatchableSource -- indexes into per-source getter arrays
 
 		bool bAnyMatch = false;
@@ -585,14 +587,7 @@ namespace PCGExMatching
 
 		if (!TaggedData.Keys)
 		{
-			if (const UPCGBasePointData* PointData = Cast<UPCGBasePointData>(TaggedData.Data))
-			{
-				TaggedData.Keys = MakeShared<FPCGAttributeAccessorKeysPointIndices>(PointData);
-			}
-			else if (TaggedData.Data->Metadata)
-			{
-				TaggedData.Keys = MakeShared<FPCGAttributeAccessorKeysEntries>(TaggedData.Data->Metadata);
-			}
+			TaggedData.Keys = PCGExMetaHelpers::MakeConstKeys(TaggedData.Data);
 		}
 
 		NumSources = MatchableSources->Num();
@@ -650,6 +645,12 @@ namespace PCGExMatching
 			{
 				return false;
 			}
+
+			if (Factory->WantsPoints())
+			{
+				bWantsPoints = true;
+			}
+
 			Operations.Add(Operation);
 
 			if (Factory->BaseConfig.Strictness == EPCGExMatchStrictness::Required)

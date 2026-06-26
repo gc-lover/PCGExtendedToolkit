@@ -22,7 +22,7 @@ class UPCGExCreateSplineSettings : public UPCGExPathProcessorSettings
 public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS(CreateSpline, "Create Spline", "Create splines from input points.");
 
@@ -66,13 +66,13 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	bool bApplyCustomTangents_DEPRECATED = false;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName ArriveTangentAttribute_DEPRECATED = "ArriveTangent";
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName LeaveTangentAttribute_DEPRECATED = "LeaveTangent";
 
 #pragma endregion

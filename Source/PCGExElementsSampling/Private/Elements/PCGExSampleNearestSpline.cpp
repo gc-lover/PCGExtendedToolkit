@@ -72,7 +72,13 @@ void UPCGExSampleNearestSplineSettings::PCGExApplyDeprecationBeforeUpdatePins(UP
 	Super::PCGExApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
 }
 
-void UPCGExSampleNearestSplineSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExSampleNearestSplineSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+
+void UPCGExSampleNearestSplineSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 74, 3)
 	{
@@ -81,9 +87,14 @@ void UPCGExSampleNearestSplineSettings::ApplyDeprecation(UPCGNode* InOutNode)
 		MaxRange.Update(RangeMaxInput_DEPRECATED, RangeMaxAttribute_DEPRECATED, RangeMax_DEPRECATED);
 	}
 
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 #endif
+
+FName UPCGExSampleNearestSplineSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
+}
 
 TArray<FPCGPinProperties> UPCGExSampleNearestSplineSettings::InputPinProperties() const
 {

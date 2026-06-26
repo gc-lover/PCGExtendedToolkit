@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PCGExCommon.h"
 #include "PCGExFilterCommon.h"
 #include "PCGExVersion.h"
 #include "Core/PCGExPointFilter.h"
@@ -72,17 +73,23 @@ public:
 	TArray<TSharedPtr<PCGExPaths::FPolyPath>> PolyPaths;
 	TSharedPtr<PCGExOctree::FItemOctree> Octree;
 
+	/** Strong owners for the synthesized per-path FTags, parallel to Datas. FPCGExTaggedData::Tags is a
+	 *  TWeakPtr, so without retaining the FTags here, Datas' tag references would dangle and tag-based data
+	 *  matching silently fails (every candidate's GetTags() returns null). The handler/filter keeps this
+	 *  factory alive for as long as matching runs (it also holds a raw pointer into PolyPaths). */
+	TArray<TSharedPtr<PCGExData::FTags>> OwnedTags;
+
 	virtual bool Init(FPCGExContext* InContext) override;
 	virtual bool WantsPreparation(FPCGExContext* InContext) override;
 	virtual PCGExFactories::EPreparationResult Prepare(FPCGExContext* InContext, const TSharedPtr<PCGExMT::FTaskManager>& TaskManager) override;
 
 	TSharedPtr<PCGExPathInclusion::FHandler> CreateHandler() const;
 
-	/** Static matching: builds an ignore list using the first point only (data-vs-data).
-	 *  Use for collection-level proxy evaluation (bCheckAgainstDataBounds) or when no per-point matching is needed.
-	 *  For per-point evaluation, filters should create their own FDataMatcher and call Test(FConstPoint, ...) instead.
-	 *  Returns true if matching passed (or no matcher). Returns false if no targets matched. */
-	bool PopulateMatchIgnoreList(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& InFacade, TSet<const UPCGData*>& OutIgnoreList) const;
+	/** Collection-level matching: builds the ignore list once (data-vs-data, first element only); the list is always
+	 *  built. Returns true if matching passed (or no matcher); returns false if no targets matched.
+	 *  Sets bOutWantsPoints=true if a rule reads a per-point attribute on the tested data -- per-point callers should
+	 *  reject it (see PCGExPointFilter::RejectPerPointMatchRule); collection/proxy callers can still use the list. */
+	bool PopulateMatchIgnoreList(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& InFacade, TSet<const UPCGData*>& OutIgnoreList, bool& bOutWantsPoints) const;
 
 	/** Whether match rule factories were provided (matching pin connected). */
 	bool HasMatchRuleFactories() const
@@ -128,6 +135,7 @@ protected:
 	TArray<FPCGTaggedData> TempTargets;
 	TArray<TSharedPtr<PCGExPaths::FPolyPath>> TempPolyPaths;
 	TArray<FPCGExTaggedData> TempTaggedData;
+	TArray<TSharedPtr<PCGExData::FTags>> TempTags;
 };
 
 namespace PCGExPathInclusion
@@ -147,9 +155,7 @@ namespace PCGExPathInclusion
 		Skip
 	};
 
-#if PCGEX_ENGINE_VERSION > 506
 	PCGEXFILTERS_API FPCGDataTypeIdentifier GetInclusionIdentifier();
-#endif
 
 	PCGEXFILTERS_API void DeclareInclusionPin(TArray<FPCGPinProperties>& PinProperties);
 
@@ -163,7 +169,7 @@ namespace PCGExPathInclusion
 		case EPCGExSplineCheckType::IsInsideOrOn:
 			return TEXT("Is Inside or On");
 		case EPCGExSplineCheckType::IsInsideAndOn:
-			return TEXT("Is Outside and On");
+			return TEXT("Is Inside and On");
 		case EPCGExSplineCheckType::IsOutside:
 			return TEXT("Is Outside");
 		case EPCGExSplineCheckType::IsOutsideOrOn:
@@ -189,6 +195,11 @@ namespace PCGExPathInclusion
 		bool bDistanceCheckOnly = false;
 		bool bIgnoreSelf = true;
 
+		// Precision mode: when not Center, the tested bounds (sphere/box) must satisfy the check, not just the
+		// center. Implemented by inflating the 'On' band by the bound's in-plane reach toward the nearest boundary
+		// (see GetInclusionFlags). Set in Init; forces the distance path (disables bFastCheck for inside/outside).
+		EPCGExDistance Precision = EPCGExDistance::Center;
+
 		EFlags GoodFlags = None;
 		EFlags BadFlags = None;
 		ESplineMatch FlagScope = Any;
@@ -202,7 +213,9 @@ namespace PCGExPathInclusion
 
 		explicit FHandler(const UPCGExPolyPathFilterFactory* InFactory);
 
-		void Init(const EPCGExSplineCheckType InCheckType);
+		// InPrecision is intentionally non-defaulted: every caller must state its bounds mode explicitly so the
+		// shared handler (also used by Time/SegmentCross filters) can never silently inherit a precision setting.
+		void Init(const EPCGExSplineCheckType InCheckType, const EPCGExDistance InPrecision);
 
 		FORCEINLINE bool TestFlags(const EFlags InFlags) const
 		{
@@ -217,7 +230,9 @@ namespace PCGExPathInclusion
 			return bPass;
 		}
 
-		EFlags GetInclusionFlags(const FVector& WorldPosition, int32& InclusionCount, const bool bClosestOnly, const UPCGData* InParentData = nullptr, const TSet<const UPCGData*>* InAdditionalExclude = nullptr) const;
+		// Tested bounds are passed as the point's transform + local bounds (read from value ranges by the caller),
+		// avoiding any FPoint virtual dispatch on the per-point hot path. Center mode only reads the location.
+		EFlags GetInclusionFlags(const FTransform& InTransform, const FVector& InBoundsMin, const FVector& InBoundsMax, int32& InclusionCount, const bool bClosestOnly, const UPCGData* InParentData = nullptr, const TSet<const UPCGData*>* InAdditionalExclude = nullptr) const;
 		PCGExMath::FClosestPosition FindClosestIntersection(const PCGExMath::FSegment& Segment, const FPCGExPathIntersectionDetails& InDetails, const UPCGData* InParentData = nullptr, const TSet<const UPCGData*>* InAdditionalExclude = nullptr) const;
 	};
 }

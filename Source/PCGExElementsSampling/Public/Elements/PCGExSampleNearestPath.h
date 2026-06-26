@@ -51,6 +51,7 @@ namespace PCGExBlending
 {
 	class IUnionBlender;
 	class FUnionOpsManager;
+	class FBlendOpsSchema;
 }
 
 namespace PCGExMT
@@ -93,7 +94,8 @@ public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
 	virtual void PCGExApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS(SampleNearestPath, "Sample : Nearest Path", "Sample the nearest(s) paths.");
 
@@ -104,6 +106,7 @@ public:
 #endif
 
 protected:
+	virtual FName GetMainInputPin() const override;
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
 	virtual TArray<FPCGPinProperties> OutputPinProperties() const override;
 	virtual bool IsPinUsedByNodeExecution(const UPCGPin* InPin) const override;
@@ -153,22 +156,22 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RangeMinInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RangeMinAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RangeMin_DEPRECATED = 0;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType RangeMaxInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector RangeMaxAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double RangeMax_DEPRECATED = 300;
 
 #pragma endregion
@@ -203,13 +206,13 @@ public:
 
 #pragma region DEPRECATED
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	EPCGExInputValueType SampleAlphaInput_DEPRECATED = EPCGExInputValueType::Constant;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FPCGAttributePropertyInputSelector SampleAlphaAttribute_DEPRECATED;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	double SampleAlphaConstant_DEPRECATED = 0.5;
 
 #pragma endregion
@@ -440,6 +443,10 @@ struct FPCGExSampleNearestPathContext final : FPCGExPointsProcessorContext
 	friend class FPCGExSampleNearestPathElement;
 
 	TArray<TObjectPtr<const UPCGExBlendOpFactory>> BlendingFactories;
+
+	// Blend configs resolved once in Boot and shared across processors -- per-processor
+	// blender init only instantiates ops instead of re-enumerating target metadata.
+	TSharedPtr<PCGExBlending::FBlendOpsSchema> BlendOpsSchema;
 
 	FPCGExApplySamplingDetails ApplySampling;
 

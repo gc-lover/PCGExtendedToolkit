@@ -63,8 +63,8 @@ class UPCGExAssetStagingSettings : public UPCGExPointsProcessorSettings
 public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
-
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
+	
 	PCGEX_NODE_INFOS_CUSTOM_SUBTITLE(AssetStaging, "Staging : Distribute", "Distribute PCGEx Asset Collection entries to points.", FName(GetDisplayName()));
 
 	virtual EPCGSettingsType GetType() const override
@@ -104,7 +104,7 @@ protected:
 	//~End UPCGSettings
 
 public:
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings)
 	EPCGExCollectionSource CollectionSource = EPCGExCollectionSource::Asset;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, EditCondition="CollectionSource == EPCGExCollectionSource::Asset", EditConditionHides))
@@ -116,24 +116,23 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, DisplayName=" └─ Attribute", EditCondition="CollectionSource == EPCGExCollectionSource::Attribute", EditConditionHides))
 	FName CollectionPathAttributeName = "CollectionPath";
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, EditCondition="CollectionSource != EPCGExCollectionSource::AttributeSet", EditConditionHides))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(EditCondition="CollectionSource != EPCGExCollectionSource::AttributeSet", EditConditionHides))
 	EPCGExStagingOutputMode OutputMode = EPCGExStagingOutputMode::CollectionMap;
 
 	/** The name of the attribute to write asset path to.*/
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, EditCondition="OutputMode == EPCGExStagingOutputMode::Attributes"))
 	FName AssetPathAttributeName = "AssetPath";
 
+	//** If enabled, doesn't go through collections recursively and assign top-level collections "as assets" */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
+	bool bFlattenSubCollections = false;
+
 	/** How distribution is configured for this node. 
 	 * Legacy uses the inline settings below -- only set for legacy nodes.
 	 * External uses a factory on the Selector input pin. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable), AdvancedDisplay)
-	EPCGExSelectorMode SelectorMode = EPCGExSelectorMode::Legacy;
+	EPCGExSelectorMode SelectorMode = EPCGExSelectorMode::External;
 
-#if WITH_EDITORONLY_DATA
-	// TODO : remove in 0.76
-	UPROPERTY()
-	bool bSelectorModePreUpdated = false;
-#endif
 
 	/** Distribution details
 	 * Note : LEGACY Nodes only. */
@@ -146,20 +145,28 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable, DisplayName="Distribution (Entry)", EditCondition="SelectorMode == EPCGExSelectorMode::Legacy", EditConditionHides))
 	FPCGExMicroCacheDistributionDetails EntryDistributionSettings;
 
-	
+
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable))
 	bool bApplyFitting = true;
-	
+
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, EditCondition="bApplyFitting", EditConditionHides))
 	FPCGExScaleToFitDetails ScaleToFit;
+
+	/** When enabled, entries that define a Scale to Fit override (entry-local or collection-global) replace this node's Scale to Fit for their points. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, DisplayName=" └─ Entry Overrides", EditCondition="bApplyFitting", EditConditionHides))
+	bool bConsiderEntryScaleToFit = true;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, EditCondition="bApplyFitting", EditConditionHides))
 	FPCGExJustificationDetails Justification;
 
+	/** When enabled, entries that define a Justification override (entry-local or collection-global) replace this node's Justification for their points. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_Overridable, DisplayName=" └─ Entry Overrides", EditCondition="bApplyFitting", EditConditionHides))
+	bool bConsiderEntryJustification = true;
+
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta=(PCG_NotOverridable, EditCondition="bApplyFitting", EditConditionHides))
 	FPCGExFittingVariationsDetails Variations;
 
-	
+
 	//** If enabled, filter output based on whether a staging has been applied or not (empty entry).  Current implementation is slow. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output", meta=(PCG_Overridable))
 	bool bPruneEmptyPoints = true;

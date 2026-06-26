@@ -10,6 +10,7 @@
 #include "PCGParamData.h"
 #include "Components/SplineMeshComponent.h"
 #include "Containers/PCGExScopedContainers.h"
+#include "Core/PCGExMT.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExDataTags.h"
 #include "Data/PCGExPointIO.h"
@@ -30,8 +31,24 @@
 #define PCGEX_NAMESPACE BuildCustomGraph
 
 #if WITH_EDITOR
-void UPCGExPathSplineMeshSettings::ApplyDeprecation(UPCGNode* InOutNode)
+
+void UPCGExPathSplineMeshSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
 {
+	// Resolve the deferred selector default ONCE, and only while still Unset so explicit user choices
+	// are never overwritten. Nodes predating the Unset default (< 1.75.19) keep the legacy inline
+	// behavior; newer nodes adopt the external-factory default. PCGExDataVersion is resolved in Serialize.
+	if (SelectorMode == EPCGExSelectorMode::Unset)
+	{
+		SelectorMode = EPCGExSelectorMode::External;
+		PCGEX_IF_VERSION_LOWER(1, 75, 19) { SelectorMode = EPCGExSelectorMode::Legacy; }
+	}
+	
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+
+void UPCGExPathSplineMeshSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
+{
+
 	PCGEX_IF_VERSION_LOWER(1, 70, 11)
 	{
 		DefaultDescriptor.SplineMeshAxis = static_cast<EPCGExSplineMeshAxis>(SplineMeshAxisConstant_DEPRECATED);
@@ -45,17 +62,8 @@ void UPCGExPathSplineMeshSettings::ApplyDeprecation(UPCGNode* InOutNode)
 			bUseStagedPoints = false;
 		}
 	}
-
-	PCGEX_IF_VERSION_LOWER(1, 75, 11)
-	{
-		if (!bSelectorModePreUpdated)
-		{
-			SelectorMode = EPCGExSelectorMode::Legacy;
-			bSelectorModePreUpdated = true; // So we don't override the value for folks who'll update in their own time
-		}
-	}
-
-	Super::ApplyDeprecation(InOutNode);
+	
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 
 void UPCGExPathSplineMeshSettings::PostInitProperties()
@@ -73,7 +81,7 @@ void UPCGExPathSplineMeshSettings::PostInitProperties()
 
 bool UPCGExPathSplineMeshSettings::IsPinUsedByNodeExecution(const UPCGPin* InPin) const
 {
-	if (InPin->Properties.Label == PCGExCollections::Labels::SourceSelectorLabel && SelectorMode != EPCGExSelectorMode::External)
+	if (InPin->Properties.Label == PCGExCollections::Labels::SourceSelectorLabel && SelectorMode == EPCGExSelectorMode::Legacy)
 	{
 		return false;
 	}
@@ -103,7 +111,7 @@ void UPCGExPathSplineMeshSettings::InputPinPropertiesBeforeFilters(TArray<FPCGPi
 		PCGEX_PIN_PARAM(PCGExCollections::Labels::SourceAssetCollection, "Attribute set to be used as collection.", Advanced)
 	}
 
-	if (!bUseStagedPoints && SelectorMode == EPCGExSelectorMode::External)
+	if (!bUseStagedPoints && SelectorMode != EPCGExSelectorMode::Legacy)
 	{
 		PCGEX_PIN_FACTORY(PCGExCollections::Labels::SourceSelectorLabel, "External selector factory driving entry picks.", Required, FPCGExDataTypeInfoSelector::AsId())
 	}
@@ -147,7 +155,7 @@ bool FPCGExPathSplineMeshElement::Boot(FPCGExContext* InContext) const
 
 	if (!Settings->bUseStagedPoints)
 	{
-		if (Settings->SelectorMode == EPCGExSelectorMode::External)
+		if (Settings->SelectorMode != EPCGExSelectorMode::Legacy)
 		{
 			TArray<TObjectPtr<const UPCGExSelectorFactoryData>> Factories;
 			if (!PCGExFactories::GetInputFactories<UPCGExSelectorFactoryData>(Context, PCGExCollections::Labels::SourceSelectorLabel, Factories, {PCGExFactories::EType::Selector}))
@@ -241,7 +249,10 @@ void FPCGExPathSplineMeshContext::RegisterAssetDependencies()
 	FPCGExPathProcessorContext::RegisterAssetDependencies();
 
 	PCGEX_SETTINGS_LOCAL(PathSplineMesh)
-	if (Settings->bUseStagedPoints) { return; }
+	if (Settings->bUseStagedPoints)
+	{
+		return;
+	}
 
 	if (Settings->CollectionSource == EPCGExCollectionSource::Attribute)
 	{
@@ -249,14 +260,23 @@ void FPCGExPathSplineMeshContext::RegisterAssetDependencies()
 		// their entries and add the recursive inner asset paths to the context's dependency set.
 		// PCG's normal LoadAssets() phase then loads all inner mesh/material assets async before
 		// PostLoadAssetsDependencies fires.
-		if (!CollectionsLoader) { return; }
-		if (!CollectionsLoader->Load()) { return; }		
+		if (!CollectionsLoader)
+		{
+			return;
+		}
+		if (!CollectionsLoader->Load())
+		{
+			return;
+		}
 		CollectionsLoader->Finalize();
 
 		TSet<FSoftObjectPath>& Required = GetRequiredAssets();
 		for (const TPair<PCGExValueHash, TObjectPtr<UPCGExAssetCollection>>& Pair : CollectionsLoader->AssetsMap)
 		{
-			if (!Pair.Value || Pair.Value->GetTypeId() != PCGExAssetCollection::TypeIds::Mesh) { continue; }
+			if (!Pair.Value || Pair.Value->GetTypeId() != PCGExAssetCollection::TypeIds::Mesh)
+			{
+				continue;
+			}
 			Pair.Value->LoadCache();
 			Pair.Value->GetAssetPaths(Required, PCGExAssetCollection::ELoadingFlags::Recursive);
 		}
@@ -288,7 +308,10 @@ bool FPCGExPathSplineMeshElement::PostBoot(FPCGExContext* InContext) const
 
 	PCGEX_CONTEXT_AND_SETTINGS(PathSplineMesh)
 
-	if (Settings->bUseStagedPoints) { return true; }
+	if (Settings->bUseStagedPoints)
+	{
+		return true;
+	}
 
 	if (Settings->CollectionSource == EPCGExCollectionSource::Attribute)
 	{
@@ -353,11 +376,15 @@ bool FPCGExPathSplineMeshElement::AdvanceWork(FPCGExContext* InContext, const UP
 
 	PCGEX_ON_INITIAL_EXECUTION
 	{
-		if (!StartBatches(InContext->GetOrCreateHandle()))
+		if (!StartBatches(InContext->GetWeakSelfHandle()))
 		{
 			return true;
 		}
 	}
+
+	// Output drives a main-thread loop that spawns spline mesh components (NewObject / AttachManagedComponent) and
+	// calls ExecuteOnNotifyActors -- illegal during a package save or GC. Defer the whole output phase (re-tick).
+	PCGEX_DEFER_IF_OBJECT_WORK_BLOCKED
 
 	PCGEX_POINTS_BATCH_PROCESSING(PCGExCommon::States::State_Done)
 

@@ -58,9 +58,10 @@ namespace PCGExData
 			Attribute = nullptr;
 			bIsValid = false;
 
-			if (const UPCGSpatialData* AsSpatial = Cast<UPCGSpatialData>(InData))
+			// Read from metadata directly so this works for any UPCGData with metadata (point/spatial AND attribute sets), not just spatial.
+			if (const UPCGMetadata* MetadataPtr = InData->ConstMetadata())
 			{
-				Attribute = AsSpatial->Metadata->GetConstAttribute(PCGExMetaHelpers::GetAttributeIdentifier(Selector, InData));
+				Attribute = MetadataPtr->GetConstAttribute(PCGExMetaHelpers::GetAttributeIdentifier(Selector, InData));
 				bIsDataDomain = Attribute ? Attribute->GetMetadataDomain()->GetDomainID().Flag == EPCGMetadataDomainFlag::Data : false;
 				bIsValid = Attribute ? true : false;
 			}
@@ -103,14 +104,22 @@ namespace PCGExData
 
 		if (ProcessingInfos.bIsDataDomain)
 		{
-			PCGExMetaHelpers::ExecuteWithRightType(ProcessingInfos.Attribute->GetTypeId(), [&](auto DummyValue)
-			{
-				using T_REAL = decltype(DummyValue);
-				DataValue = MakeShared<TDataValue<T_REAL>>(Helpers::ReadDataValue(static_cast<const FPCGMetadataAttribute<T_REAL>*>(ProcessingInfos.Attribute)));
+			PCGExMetaHelpers::ExecuteWithRightType(
+				ProcessingInfos.Attribute,
+				[&](auto DummyValue)
+				{
+					using T_REAL = decltype(DummyValue);
+					DataValue = MakeShared<TDataValue<T_REAL>>(Helpers::ReadDataValue<T_REAL>(ProcessingInfos.Attribute));
 
-				const FSubSelection& S = ProcessingInfos.SubSelection;
-				TypedDataValue = S.bIsValid ? S.Get<T_REAL, T>(DataValue->GetValue<T_REAL>()) : PCGExTypeOps::Convert<T_REAL, T>(DataValue->GetValue<T_REAL>());
-			});
+					const FSubSelection& S = ProcessingInfos.SubSelection;
+					TypedDataValue = S.HasSelection() ? S.Get<T_REAL, T>(DataValue->GetValue<T_REAL>()) : PCGExTypeOps::Convert<T_REAL, T>(DataValue->GetValue<T_REAL>());
+				},
+				[&]()
+				{
+					// Broadcasting performs typed conversion; container/extended source types have no
+					// meaningful conversion to a templated T. Mark the broadcaster as invalid so callers skip it.
+					ProcessingInfos.bIsValid = false;
+				});
 		}
 		else
 		{
@@ -159,6 +168,22 @@ namespace PCGExData
 	template <typename T>
 	bool TAttributeBroadcaster<T>::PrepareForSingleFetch(const FPCGAttributePropertyInputSelector& InSelector, const UPCGData* InData, const TSharedPtr<IPCGAttributeAccessorKeys> InKeys)
 	{
+		Min = Traits::Min();
+		Max = Traits::Max();
+
+		// Resolve the selector + accessor first; this also classifies the attribute domain.
+		if (!ApplySelector(InSelector, InData))
+		{
+			return false;
+		}
+
+		// @Data-domain values are read as a single constant -- no per-element keys are required.
+		if (ProcessingInfos.bIsDataDomain)
+		{
+			return true;
+		}
+
+		// Element-domain reads need keys aligned with the accessor.
 		if (InKeys)
 		{
 			Keys = InKeys;
@@ -167,19 +192,18 @@ namespace PCGExData
 		{
 			Keys = MakeShared<FPCGAttributeAccessorKeysPointIndices>(PointData);
 		}
-		else if (InData->Metadata)
+		else
 		{
-			Keys = MakeShared<FPCGAttributeAccessorKeysEntries>(InData->Metadata);
+			// Non-point data (e.g. attribute sets): let the engine build keys that match the accessor for any
+			// selector (attribute / property / $Index).
+			const FPCGAttributePropertyInputSelector Resolved = InSelector.CopyAndFixLast(InData);
+			if (TUniquePtr<const IPCGAttributeAccessorKeys> EngineKeys = PCGAttributeAccessorHelpers::CreateConstKeys(InData, Resolved))
+			{
+				Keys = MakeShareable(const_cast<IPCGAttributeAccessorKeys*>(EngineKeys.Release()));
+			}
 		}
 
-		if (!Keys)
-		{
-			return false;
-		}
-
-		Min = Traits::Min();
-		Max = Traits::Max();
-		return ApplySelector(InSelector, InData);
+		return Keys.IsValid();
 	}
 
 	template <typename T>
@@ -333,7 +357,7 @@ namespace PCGExData
 
 		// TODO : Revise this work with a custom has function and output an array of unique values instead
 
-		if constexpr (std::is_same_v<T, FRotator> || std::is_same_v<T, FTransform>)
+		if constexpr (std::is_same_v<T, FRotator> || std::is_same_v<T, FTransform> || std::is_same_v<T, FText>)
 		{
 			UE_LOG(LogTemp, Error, TEXT("Unique value type is unsupported at the moment."))
 		}
@@ -422,7 +446,9 @@ namespace PCGExData
 		}
 
 		TSharedPtr<IAttributeBroadcaster> Broadcaster = nullptr;
-		PCGExMetaHelpers::ExecuteWithRightType(Attribute->GetTypeId(), [&](auto DummyValue)
+		// Container/extended types fall through silently -- broadcasting requires a templated T,
+		// which has no meaning for TArray/Struct/Object. Caller gets nullptr and handles it.
+		PCGExMetaHelpers::ExecuteWithRightType(Attribute, [&](auto DummyValue)
 		{
 			using T = decltype(DummyValue);
 			TSharedPtr<TAttributeBroadcaster<T>> TypedBroadcaster = MakeShared<TAttributeBroadcaster<T>>();
@@ -451,6 +477,29 @@ namespace PCGExData
 			using T = decltype(DummyValue);
 			TSharedPtr<TAttributeBroadcaster<T>> TypedBroadcaster = MakeShared<TAttributeBroadcaster<T>>();
 			if (!(bSingleFetch ? TypedBroadcaster->PrepareForSingleFetch(InSelector, InData) : TypedBroadcaster->Prepare(InSelector, InPointIO)))
+			{
+				return;
+			}
+			Broadcaster = TypedBroadcaster;
+		});
+
+		return Broadcaster;
+	}
+
+	TSharedPtr<IAttributeBroadcaster> MakeBroadcaster(const FPCGAttributePropertyInputSelector& InSelector, const UPCGData* InData)
+	{
+		EPCGMetadataTypes Type = EPCGMetadataTypes::Unknown;
+		if (!TryGetType(InSelector, InData, Type))
+		{
+			return nullptr;
+		}
+
+		TSharedPtr<IAttributeBroadcaster> Broadcaster = nullptr;
+		PCGExMetaHelpers::ExecuteWithRightType(Type, [&](auto DummyValue)
+		{
+			using T = decltype(DummyValue);
+			TSharedPtr<TAttributeBroadcaster<T>> TypedBroadcaster = MakeShared<TAttributeBroadcaster<T>>();
+			if (!TypedBroadcaster->PrepareForSingleFetch(InSelector, InData))
 			{
 				return;
 			}

@@ -137,16 +137,13 @@ namespace PCGExGraphs
 
 	int32 FSubGraph::GetFirstInIOIndex()
 	{
-		for (const int32 InIOIndex : EdgesInIOIndices)
-		{
-			return InIOIndex;
-		}
-		return -1;
+		const TSet<int32>::TConstIterator It = EdgesInIOIndices.CreateConstIterator();
+		return It ? *It : -1;
 	}
 
 	void FSubGraph::Compile(const TWeakPtr<PCGExMT::IAsyncHandleGroup>& InParentHandle, const TSharedPtr<PCGExMT::FTaskManager>& TaskManager, const TSharedPtr<FGraphBuilder>& InBuilder)
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(FWriteSubGraphEdges::ExecuteTask);
+		TRACE_CPUPROFILER_EVENT_SCOPE(FSubGraph::Compile);
 
 		const TSharedPtr<FGraph> ParentGraph = WeakParentGraph.Pin();
 		const TArray<FNode>& ParentGraphNodes = ParentGraph->Nodes;
@@ -174,7 +171,13 @@ namespace PCGExGraphs
 				)
 		}
 
-		PCGExSortingHelpers::RadixSort(Edges);
+		// Sorting establishes a deterministic output edge order; builders whose edge
+		// insertion order is already deterministic can opt out of the cost entirely.
+		if (InBuilder->bSortEdgeKeys || InBuilder->bRequiresEdgeResort)
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(FSubGraph::Compile::SortEdges);
+			PCGExSortingHelpers::RadixSort(Edges);
+		}
 
 		FlattenedEdges.SetNumUninitialized(NumEdges);
 
@@ -205,18 +208,25 @@ namespace PCGExGraphs
 		EnumRemoveFlags(AllocateProperties, EPCGPointNativeProperties::MetadataEntry);
 
 		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(FWriteSubGraphEdges::BuildEdgesEntries);
+			TRACE_CPUPROFILER_EVENT_SCOPE(FSubGraph::Compile::BuildEdgesEntries);
 
 			const TPCGValueRange<int64> OutMetadataEntries = OutEdgeData->GetMetadataEntryValueRange(false);
 			UPCGMetadata* Metadata = OutEdgeData->MutableMetadata();
 
+			// Entry keys handed out by AddEntryPlaceholder are sequential from the current
+			// item count; this metadata is exclusively owned by this subgraph during
+			// compilation, so the keys are synthesized directly instead of paying one
+			// lock + shared atomic per edge. AddDelayedEntries sizes from the array we
+			// pass, which keeps it in sync.
+			const int64 EntryStart = Metadata->GetItemCountForChild();
+
 			TArray<TTuple<int64, int64>> DelayedEntries;
-			DelayedEntries.SetNum(NumEdges);
+			DelayedEntries.SetNumUninitialized(NumEdges);
 
 			if (InEdgeData)
 			{
 				// We'll cherry pick existing edges
-				TRACE_CPUPROFILER_EVENT_SCOPE(FWriteSubGraphEdges::CherryPickInheritedEdges);
+				TRACE_CPUPROFILER_EVENT_SCOPE(FSubGraph::Compile::CherryPickInheritedEdges);
 
 				TArray<int32> ReadEdgeIndices;
 				TArray<int32> WriteEdgeIndices;
@@ -248,8 +258,9 @@ namespace PCGExGraphs
 							WriteEdgeIndices[LocalWriteIndex] = i;
 						}
 
-						OutMetadataEntries[i] = Metadata->AddEntryPlaceholder();
-						DelayedEntries[i] = MakeTuple(OutMetadataEntries[i], ParentEntry);
+						const int64 Entry = EntryStart + i;
+						OutMetadataEntries[i] = Entry;
+						DelayedEntries[i] = MakeTuple(Entry, ParentEntry);
 					});
 
 				ReadEdgeIndices.SetNum(WriteIndex);
@@ -259,7 +270,7 @@ namespace PCGExGraphs
 			}
 			else
 			{
-				TRACE_CPUPROFILER_EVENT_SCOPE(FWriteSubGraphEdges::CreatePoints);
+				TRACE_CPUPROFILER_EVENT_SCOPE(FSubGraph::Compile::CreatePoints);
 
 				PCGExMT::ParallelOrSequential(
 					NumEdges,
@@ -268,8 +279,9 @@ namespace PCGExGraphs
 						const FEdge& E = ParentGraphEdges[Edges[i].Index];
 						FlattenedEdges[i] = FEdge(i, ParentGraphNodes[E.Start].PointIndex, ParentGraphNodes[E.End].PointIndex, i, E.Index);
 
-						OutMetadataEntries[i] = Metadata->AddEntryPlaceholder();
-						DelayedEntries[i] = MakeTuple(OutMetadataEntries[i], PCGInvalidEntryKey);
+						const int64 Entry = EntryStart + i;
+						OutMetadataEntries[i] = Entry;
+						DelayedEntries[i] = MakeTuple(Entry, PCGInvalidEntryKey);
 					});
 			}
 
@@ -297,12 +309,8 @@ MACRO(EdgeUnionSize, int32, 0, UnionSize)
 
 				TArray<TSharedRef<PCGExData::FFacade>> EdgeSources = *InBuilder->SourceEdgeFacades;
 
-				if (InBuilder->SourceEdgeFacades->Num() >= 3 && InBuilder->Graph->SubGraphs.Num() > 1)
+				if (InBuilder->SourceEdgeFacades->Num() > 1)
 				{
-					// NOTE : Need to find better metrics.
-					// We want to avoid going through massive graphs with few sources as it would be wasted compute
-					// On the other end many small subgraphs will cripple the cache with tons of useless source references
-
 					TRACE_CPUPROFILER_EVENT_SCOPE(FindUniqueSourceIOIndices);
 
 					TSet<int32> UniqueSourceIOIndices;

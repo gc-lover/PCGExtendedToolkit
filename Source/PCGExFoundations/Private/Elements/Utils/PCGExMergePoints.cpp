@@ -19,7 +19,14 @@ namespace PCGExMergePoints
 	PCGEX_CTX_STATE(State_MergingData);
 }
 
-void FPCGExMergeList::Merge(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager, const FPCGExCarryOverDetails* InCarryOverDetails)
+UPCGExMergePointsSettings::UPCGExMergePointsSettings()
+{
+	// Merge Points is the one node that promotes @Data attributes to the elements domain by default;
+	// bDataDomainToElements is off everywhere else.
+	CarryOverDetails.bDataDomainToElements = true;
+}
+
+void FPCGExMergeList::Merge(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager, const FPCGExCarryOverDetails* InCarryOverDetails, const FPCGExNameFiltersDetails* InTagsToAttributes)
 {
 	if (IOs.IsEmpty())
 	{
@@ -38,13 +45,20 @@ void FPCGExMergeList::Merge(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager
 
 	Merger = MakeShared<FPCGExPointIOMerger>(CompositeDataFacade.ToSharedRef());
 	Merger->Append(IOs);
-	Merger->MergeAsync(TaskManager, InCarryOverDetails);
+	Merger->MergeAsync(TaskManager, InCarryOverDetails, nullptr, false, InTagsToAttributes);
 }
 
 void FPCGExMergeList::Write(const TSharedPtr<PCGExMT::FTaskManager>& TaskManager) const
 {
 	CompositeDataFacade->WriteFastest(TaskManager);
 }
+
+#if WITH_EDITOR
+TArray<FText> UPCGExMergePointsSettings::GetNodeTitleAliases() const
+{
+	return {FTEXT("PCGEx | Merge Points by Tag")};
+}
+#endif
 
 FPCGElementPtr UPCGExMergePointsSettings::CreateElement() const
 {
@@ -111,6 +125,10 @@ bool FPCGExMergePointsElement::Boot(FPCGExContext* InContext) const
 
 	Context->CarryOverDetails = Settings->CarryOverDetails;
 	Context->CarryOverDetails.Init();
+
+	Context->bTagToAttributes = Settings->bTagToAttributes;
+	Context->TagsToAttributes = Settings->TagsToAttributes;
+	Context->TagsToAttributes.Init();
 
 	// Initialize the data matcher
 	Context->DataMatcher = MakeShared<PCGExMatching::FDataMatcher>();
@@ -222,9 +240,9 @@ bool FPCGExMergePointsElement::AdvanceWork(FPCGExContext* InContext, const UPCGE
 
 			for (const TSharedPtr<FPCGExMergeList>& List : Context->MergeLists)
 			{
-				MergeAsync->AddSimpleCallback([List, TaskManager, Det = Context->CarryOverDetails]
+				MergeAsync->AddSimpleCallback([List, TaskManager, Det = Context->CarryOverDetails, bT2A = Context->bTagToAttributes, TagDet = Context->TagsToAttributes]
 				{
-					List->Merge(TaskManager, &Det);
+					List->Merge(TaskManager, &Det, PCGExDataFilter::ResolveOptional(bT2A, TagDet));
 				});
 			}
 

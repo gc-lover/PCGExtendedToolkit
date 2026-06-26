@@ -4,7 +4,6 @@
 
 #include "Elements/Filtering/PCGExUberFilter.h"
 
-
 #include "PCGExPickersCommon.h"
 #include "PCGExVersion.h"
 #include "Containers/PCGExScopedContainers.h"
@@ -20,7 +19,7 @@
 #define PCGEX_NAMESPACE UberFilter
 
 #if WITH_EDITOR
-void UPCGExUberFilterSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExUberFilterSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 70, 11)
 	{
@@ -35,7 +34,7 @@ void UPCGExUberFilterSettings::ApplyDeprecation(UPCGNode* InOutNode)
 		ResultDetails.ApplyDeprecation();
 	}
 
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 #endif
 

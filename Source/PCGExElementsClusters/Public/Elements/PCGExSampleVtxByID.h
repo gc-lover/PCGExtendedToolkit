@@ -25,6 +25,7 @@ namespace PCGExBlending
 {
 	class IUnionBlender;
 	class FUnionOpsManager;
+	class FBlendOpsSchema;
 }
 
 namespace PCGExMT
@@ -43,6 +44,7 @@ public:
 
 	//~Begin UPCGSettings
 #if WITH_EDITOR
+	virtual void ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins) override;
 	PCGEX_NODE_INFOS(SampleVtxByID, "Sample : Vtx by ID", "Sample a cluster vtx by using a stored Vtx ID.");
 
 	virtual FLinearColor GetNodeTitleColor() const override
@@ -52,6 +54,7 @@ public:
 #endif
 
 protected:
+	virtual FName GetMainInputPin() const override;
 	virtual TArray<FPCGPinProperties> InputPinProperties() const override;
 	virtual FPCGElementPtr CreateElement() const override;
 	//~End UPCGSettings
@@ -128,6 +131,10 @@ struct FPCGExSampleVtxByIDContext final : FPCGExPointsProcessorContext
 	TMap<uint32, uint64> VtxLookup; // Vtx ID :: PointIndex << IOIndex
 
 	TArray<TObjectPtr<const UPCGExBlendOpFactory>> BlendingFactories;
+
+	// Blend configs resolved once in Boot and shared across processors -- per-processor
+	// blender init only instantiates ops instead of re-enumerating target metadata.
+	TSharedPtr<PCGExBlending::FBlendOpsSchema> BlendOpsSchema;
 
 	FPCGExApplySamplingDetails ApplySampling;
 

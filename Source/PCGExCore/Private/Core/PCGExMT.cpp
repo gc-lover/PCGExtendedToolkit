@@ -8,6 +8,8 @@
 #include "PCGExSettingsCacheBody.h"
 #include "PCGExSubSystem.h"
 #include "Async/Async.h"
+#include "UObject/GarbageCollection.h"
+#include "UObject/UObjectGlobals.h"
 #include "Core/PCGExContext.h"
 #include "Core/PCGExSettings.h"
 #include "HAL/PlatformTime.h"
@@ -489,7 +491,7 @@ namespace PCGExMT
 	FTaskManager::FTaskManager(FPCGExContext* InContext)
 		: IAsyncHandleGroup(FName("MANAGER"))
 		  , Context(InContext)
-		  , ContextHandle(InContext->GetOrCreateHandle())
+		  , ContextHandle(InContext->GetWeakSelfHandle())
 	{
 		WorkHandle = Context->GetWorkHandle();
 	}
@@ -678,9 +680,14 @@ namespace PCGExMT
 			InTask->SetGroup(ThisPtr);
 		}
 
-		UE::Tasks::Launch(*InTask->DEBUG_HandleId(), [WeakManager = TWeakPtr<FTaskManager>(SharedThis(this)), Task = InTask]()
+		UE::Tasks::Launch(*InTask->DEBUG_HandleId(), [WeakManager = TWeakPtr<FTaskManager>(SharedThis(this)), Task = InTask, PinTracker = Context->GetAsyncPinTracker()]()
 		{
 #define PCGEX_CANCEL_TASK_INTERNAL Task->Cancel(); Task->Complete(); return;
+
+			// Count this task BEFORE the gate below and the FSharedContext pin: a task that may pin is
+			// always counted first, while one starting post-cancel bails at the gate unpinned. This is
+			// the ordering FAsyncContextPinScope documents; the cancel finalizer relies on it.
+			FAsyncContextPinScope PinScope(PinTracker);
 
 			const TSharedPtr<FTaskManager> Manager = WeakManager.Pin();
 			if (!Manager || !Manager->IsAvailable())
@@ -693,7 +700,7 @@ namespace PCGExMT
 				// being destroyed while this task runs. Without this, the context could be
 				// garbage-collected mid-execution if the PCG graph is torn down.
 				FPCGContext::FSharedContext<FPCGExContext> SharedContext(Manager->ContextHandle);
-				if (!SharedContext.Get())
+				if (!SharedContext.Get() || SharedContext.Get()->IsWorkCancelled())
 				{
 					PCGEX_CANCEL_TASK_INTERNAL
 				}
@@ -876,9 +883,7 @@ namespace PCGExMT
 								return;
 							}
 							ExecScopeIteration(Loops[i], bPreparationOnly);
-						},
-						2,                                  // Threshold=2: redundant given the NumScopes==1 branch above, but harmless.
-						EParallelForFlags::Unbalanced);     // Scope cost commonly varies (filtered points, data-dependent inner loops, cluster connectivity).
+						}, /*Threshold=*/2, EParallelForFlags::Unbalanced);
 				}
 
 				CompletedCount.fetch_add(NumScopes, std::memory_order_acq_rel);
@@ -978,6 +983,15 @@ namespace PCGExMT
 		}
 
 		AsyncTask(ENamedThreads::GameThread, Callback);
+	}
+
+	bool IsObjectWorkBlocked()
+	{
+		// UObject creation / lookup / mutation (spawning actors, NewObject, FindFunction) is illegal while a package
+		// save or GC is in progress. GIsSavingPackage is game-thread-owned and non-atomic, so only consult it on the
+		// game thread -- off-thread callers are advisory (the actual UObject work is game-thread-marshaled and re-checks
+		// there). IsGarbageCollecting() reads an atomic and is safe from any thread.
+		return (IsInGameThread() && UE::IsSavingPackage()) || IsGarbageCollecting();
 	}
 
 	void ExecuteOnMainThreadAndWait(FExecuteCallback&& Callback)

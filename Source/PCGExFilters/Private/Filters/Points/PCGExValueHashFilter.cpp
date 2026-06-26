@@ -39,7 +39,7 @@ PCGExFactories::EPreparationResult UPCGExValueHashFilterFactory::Prepare(FPCGExC
 
 	PCGExArrayHelpers::InitArray(Hashes, SetSources.Num());
 
-	TWeakPtr<FPCGContextHandle> CtxHandle = InContext->GetOrCreateHandle();
+	TWeakPtr<FPCGContextHandle> CtxHandle = InContext->GetWeakSelfHandle();
 	PCGEX_ASYNC_GROUP_CHKD_RET(TaskManager, GrabUniqueValues, PCGExFactories::EPreparationResult::Fail)
 
 	GrabUniqueValues->OnCompleteCallback = [CtxHandle, this]()
@@ -107,12 +107,12 @@ PCGExFactories::EPreparationResult UPCGExValueHashFilterFactory::Prepare(FPCGExC
 		if (Config.SetAttributeName.IsNone())
 		{
 			TSharedPtr<PCGExData::FAttributesInfos> Infos = PCGExData::FAttributesInfos::Get(SourceFacade->GetIn()->Metadata);
-			if (Infos->Attributes.IsEmpty())
+			if (Infos->Identities.IsEmpty())
 			{
 				return;
 			}
 
-			Identifier = Infos->Identities[0].Identifier;
+			Identifier = Infos->Identities[0].GetIdentifier();
 		}
 		else
 		{

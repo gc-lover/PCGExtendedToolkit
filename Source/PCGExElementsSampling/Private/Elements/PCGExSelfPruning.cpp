@@ -22,7 +22,7 @@ PCGEX_SETTING_VALUE_IMPL(UPCGExSelfPruningSettings, SecondaryExpansion, double, 
 
 bool UPCGExSelfPruningSettings::IsPinUsedByNodeExecution(const UPCGPin* InPin) const
 {
-	if ((Mode != EPCGExSelfPruningMode::Prune || bRandomize) && InPin->Properties.Label == PCGExSorting::Labels::SourceSortingRules)
+	if (Mode != EPCGExSelfPruningMode::Prune && InPin->Properties.Label == PCGExSorting::Labels::SourceSortingRules)
 	{
 		return false;
 	}
@@ -38,7 +38,17 @@ bool UPCGExSelfPruningSettings::HasDynamicPins() const
 TArray<FPCGPinProperties> UPCGExSelfPruningSettings::InputPinProperties() const
 {
 	TArray<FPCGPinProperties> PinProperties = Super::InputPinProperties();
-	PCGExSorting::DeclareSortingRulesInputs(PinProperties, bRandomize ? EPCGPinStatus::Advanced : EPCGPinStatus::Normal);
+	PCGExSorting::DeclareSortingRulesInputs(PinProperties, EPCGPinStatus::Normal);
+	return PinProperties;
+}
+
+TArray<FPCGPinProperties> UPCGExSelfPruningSettings::OutputPinProperties() const
+{
+	TArray<FPCGPinProperties> PinProperties = Super::OutputPinProperties();
+	if (bOutputDiscard && Mode == EPCGExSelfPruningMode::Prune)
+	{
+		PCGEX_PIN_POINTS(PCGExCommon::Labels::OutputDiscardedLabel, "Points that were pruned away.", Normal)
+	}
 	return PinProperties;
 }
 
@@ -55,6 +65,12 @@ bool FPCGExSelfPruningElement::Boot(FPCGExContext* InContext) const
 	PCGEX_CONTEXT_AND_SETTINGS(SelfPruning)
 
 	PCGEX_VALIDATE_NAME_CONDITIONAL(Settings->Mode == EPCGExSelfPruningMode::WriteResult, Settings->NumOverlapAttributeName)
+
+	if (Settings->bOutputDiscard && Settings->Mode == EPCGExSelfPruningMode::Prune)
+	{
+		Context->Discarded = MakeShared<PCGExData::FPointIOCollection>(InContext);
+		Context->Discarded->OutputPin = PCGExCommon::Labels::OutputDiscardedLabel;
+	}
 
 	return true;
 }
@@ -84,8 +100,17 @@ bool FPCGExSelfPruningElement::AdvanceWork(FPCGExContext* InContext, const UPCGE
 	PCGEX_POINTS_BATCH_PROCESSING(PCGExCommon::States::State_Done)
 
 	Context->MainPoints->StageOutputs();
-	Context->Done();
 
+	if (Context->Discarded)
+	{
+		// Bit 1 == the 'Discarded' pin (bit 0 is the main output). Deactivate it when no points were pruned.
+		if (!Context->Discarded->StageOutputs())
+		{
+			Context->OutputData.InactiveOutputPinBitmask |= 1ULL << 1;
+		}
+	}
+
+	Context->Done();
 
 	return Context->TryComplete();
 }
@@ -150,8 +175,13 @@ namespace PCGExSelfPruning
 			TSharedPtr<PCGExSorting::FSorter> Sorter = MakeShared<PCGExSorting::FSorter>(Context, PointDataFacade, PCGExSorting::GetSortingRules(Context, PCGExSorting::Labels::SourceSortingRules));
 			Sorter->SortDirection = Settings->SortDirection;
 
-			PCGEX_SHARED_CONTEXT(Context->GetOrCreateHandle())
-			if (Sorter->Init(Context))
+			PCGEX_SHARED_CONTEXT(Context->GetWeakSelfHandle())
+
+			// When the sorting rules produce an ordering, SortDirection is already baked into Order;
+			// the randomize pass below must then NOT re-apply it. With no rules, Order stays identity
+			// and the randomize pass owns the SortDirection semantics.
+			const bool bHasRuleOrder = Sorter->Init(Context);
+			if (bHasRuleOrder)
 			{
 				if (TSharedPtr<PCGExSorting::FSortCache> Cache = Sorter->BuildCache(NumPoints))
 				{
@@ -174,12 +204,19 @@ namespace PCGExSelfPruning
 				TConstPCGValueRange<int32> Seeds = PointDataFacade->GetIn()->GetConstSeedValueRange();
 				const int32 MaxRange = NumPoints * Settings->RandomRange;
 				const int32 MinRange = -MaxRange;
-				for (int i = 0; i < NumPoints; i++)
+
+				// Perturb each point's rank (its position in Order) by a per-point random offset.
+				// Priority is keyed by point index so the comparator below reads consistent values,
+				// and the noise draws from that point's own seed (Order[i] is the point at rank i).
+				for (int32 i = 0; i < NumPoints; i++)
 				{
-					Priority[i] = Order[i] + PCGExRandomHelpers::GetRandomStreamFromPoint(Seeds[i], 0, Settings).RandRange(MinRange, MaxRange);
+					const int32 PointIndex = Order[i];
+					Priority[PointIndex] = i + PCGExRandomHelpers::GetRandomStreamFromPoint(Seeds[PointIndex], 0, Settings).RandRange(MinRange, MaxRange);
 				}
-				if (Settings->SortDirection == EPCGExSortDirection::Descending)
+
+				if (!bHasRuleOrder && Settings->SortDirection == EPCGExSortDirection::Descending)
 				{
+					// No rule ordering to honor: SortDirection flips the (otherwise identity) rank order.
 					Order.Sort([&](const int32 A, const int32 B)
 					{
 						return Priority[A] > Priority[B];
@@ -551,6 +588,17 @@ namespace PCGExSelfPruning
 		}
 
 		PCGEX_INIT_IO_VOID(PointDataFacade->Source, PCGExData::EIOInit::Duplicate)
+
+		// Mask is the keep-set; the pruned-away points are its inverse. Built from In before
+		// Gather compacts Out (Gather only touches Out, so ordering is irrelevant).
+		if (Context->Discarded)
+		{
+			if (const TSharedPtr<PCGExData::FPointIO> Discarded = Context->Discarded->Emplace_GetRef(PointDataFacade->GetIn(), PCGExData::EIOInit::New))
+			{
+				(void)Discarded->InheritPoints(Mask, true);
+			}
+		}
+
 		(void)PointDataFacade->Source->Gather(Mask);
 	}
 }

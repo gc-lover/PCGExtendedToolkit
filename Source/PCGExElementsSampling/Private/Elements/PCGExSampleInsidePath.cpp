@@ -5,6 +5,7 @@
 
 #include "Blenders/PCGExUnionOpsManager.h"
 #include "Core/PCGExBlendOpsManager.h"
+#include "Core/PCGExBlendOpsSchema.h"
 #include "Core/PCGExOpStats.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExDataHelpers.h"
@@ -52,14 +53,14 @@ void UPCGExSampleInsidePathSettings::PCGExApplyDeprecationBeforeUpdatePins(UPCGN
 	Super::PCGExApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
 }
 
-void UPCGExSampleInsidePathSettings::ApplyDeprecation(UPCGNode* InOutNode)
+void UPCGExSampleInsidePathSettings::PCGExApplyDeprecation(UPCGNode* InOutNode)
 {
 	PCGEX_IF_VERSION_LOWER(1, 74, 3)
 	{
 		MinRange.Update(RangeMinInput_DEPRECATED, RangeMinAttribute_DEPRECATED, RangeMin_DEPRECATED);
 		MaxRange.Update(RangeMaxInput_DEPRECATED, RangeMaxAttribute_DEPRECATED, RangeMax_DEPRECATED);
 	}
-	Super::ApplyDeprecation(InOutNode);
+	Super::PCGExApplyDeprecation(InOutNode);
 }
 #endif
 
@@ -180,9 +181,18 @@ bool FPCGExSampleInsidePathElement::Boot(FPCGExContext* InContext) const
 
 	if (!Context->BlendingFactories.IsEmpty())
 	{
+		// Resolve blend op configs once, here, single-threaded: per-processor blender init then
+		// only instantiates ops (no concurrent metadata enumeration on shared target facades),
+		// and the preloader warms exactly the attribute set the ops will read.
+		Context->BlendOpsSchema = MakeShared<PCGExBlending::FBlendOpsSchema>();
+		if (!Context->BlendOpsSchema->Init(Context, Context->BlendingFactories, Context->TargetsHandler->GetFacades()))
+		{
+			return false;
+		}
+
 		Context->TargetsHandler->ForEachPreloader([&](PCGExData::FFacadePreloader& Preloader)
 		{
-			PCGExBlending::RegisterBuffersDependencies_SourceA(Context, Preloader, Context->BlendingFactories);
+			Context->BlendOpsSchema->RegisterBuffersDependencies(Context, Preloader);
 		});
 	}
 
@@ -207,7 +217,7 @@ bool FPCGExSampleInsidePathElement::AdvanceWork(FPCGExContext* InContext, const 
 	{
 		Context->SetState(PCGExCommon::States::State_FacadePreloading);
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetOrCreateHandle();
+		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetWeakSelfHandle();
 		Context->TargetsHandler->TargetsPreloader->OnCompleteCallback = [Settings, Context, WeakHandle]()
 		{
 			PCGEX_SHARED_CONTEXT_VOID(WeakHandle)
@@ -298,7 +308,7 @@ namespace PCGExSampleInsidePath
 		if (!Context->BlendingFactories.IsEmpty())
 		{
 			UnionBlendOpsManager = MakeShared<PCGExBlending::FUnionOpsManager>(&Context->BlendingFactories, Distances);
-			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetsHandler->GetFacades()))
+			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetsHandler->GetFacades(), Context->BlendOpsSchema))
 			{
 				return false;
 			}
@@ -538,9 +548,13 @@ namespace PCGExSampleInsidePath
 			return;
 		}
 
+		// bResetWithFirstValue collapses an array buffer to its first element as the attribute's
+		// default value (TArrayBuffer<T>::Write special path). It's a no-op on Data-domain buffers
+		// (single-value), so gate by domain to keep intent explicit and avoid setting a flag that
+		// never fires for half the buffers it touches.
 		for (const TSharedPtr<PCGExData::IBuffer>& Buffer : PointDataFacade->Buffers)
 		{
-			if (Buffer->IsWritable())
+			if (Buffer->IsWritable() && Buffer->GetUnderlyingDomain() == PCGExData::EDomainType::Elements)
 			{
 				Buffer->bResetWithFirstValue = true;
 			}

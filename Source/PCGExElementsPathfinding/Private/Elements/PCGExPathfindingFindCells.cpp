@@ -426,7 +426,6 @@ namespace PCGExFindContours
 					return;
 				}
 
-				OBBPointIO->Tags->Reset();
 				OBBPointIO->IOIndex = BatchIndex;
 				PCGExClusters::Helpers::CleanupClusterData(OBBPointIO);
 
@@ -656,7 +655,6 @@ namespace PCGExFindContours
 				return;
 			}
 
-			OBBPointIO->Tags->Reset();
 			OBBPointIO->IOIndex = BatchIndex;
 			PCGExClusters::Helpers::CleanupClusterData(OBBPointIO);
 
@@ -672,6 +670,11 @@ namespace PCGExFindContours
 			if (!Context->OutputPaths->EmplaceBatch<UPCGPointArrayData>(CellsIOIndices, VtxDataFacade->Source, PCGExData::EIOInit::New))
 			{
 				return;
+			}
+			
+			for (const TSharedPtr<PCGExData::FPointIO>& IO : CellsIOIndices)
+			{
+				PCGExClusters::Helpers::CleanupClusterData(IO);
 			}
 
 			PCGEX_ASYNC_GROUP_CHKD_VOID(TaskManager, ProcessCellsTask)

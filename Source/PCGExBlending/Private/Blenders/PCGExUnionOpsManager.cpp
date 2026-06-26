@@ -6,6 +6,7 @@
 #include "Containers/PCGExIndexLookup.h"
 #include "Core/PCGExBlendOpFactory.h"
 #include "Core/PCGExBlendOpsManager.h"
+#include "Core/PCGExBlendOpsSchema.h"
 #include "Core/PCGExOpStats.h"
 #include "Core/PCGExUnionData.h"
 #include "Data/PCGExData.h"
@@ -23,7 +24,7 @@ namespace PCGExBlending
 	{
 	}
 
-	bool FUnionOpsManager::Init(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& TargetData, const TArray<TSharedRef<PCGExData::FFacade>>& InSources)
+	bool FUnionOpsManager::Init(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& TargetData, const TArray<TSharedRef<PCGExData::FFacade>>& InSources, const TSharedPtr<const FBlendOpsSchema>& InSchema)
 	{
 		CurrentTargetData = TargetData;
 
@@ -44,7 +45,7 @@ namespace PCGExBlending
 			TSharedPtr<FBlendOpsManager> BlendOpsManager = MakeShared<FBlendOpsManager>(TargetData, true);
 			BlendOpsManager->SetSourceA(Src, PCGExData::EIOSide::In);
 
-			if (!BlendOpsManager->Init(InContext, *BlendingFactories))
+			if (InSchema ? !BlendOpsManager->Init(InContext, InSchema) : !BlendOpsManager->Init(InContext, *BlendingFactories))
 			{
 				return false;
 			}
@@ -62,7 +63,16 @@ namespace PCGExBlending
 			for (const FPCGExBlendOperation* Op : Blender->GetCachedOperations())
 			{
 				const FName Name = UPCGExBlendOpFactory::GetOutputTargetName(Op->Config);
-				if (!Name.IsNone() && !SharedIndexMap.Contains(Name))
+
+				// Every op must resolve to an output name to map into the shared tracker slots; an
+				// unnamed op would keep its local OpIdx and index the tracker out of bounds in Blend().
+				if (Name.IsNone())
+				{
+					PCGE_LOG_C(Error, GraphAndLog, InContext, FTEXT("A blend operation has no resolvable output target and cannot participate in union blending."));
+					return false;
+				}
+
+				if (!SharedIndexMap.Contains(Name))
 				{
 					SharedIndexMap.Add(Name, NextIdx++);
 				}
@@ -90,10 +100,10 @@ namespace PCGExBlending
 		return true;
 	}
 
-	bool FUnionOpsManager::Init(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& TargetData, const TArray<TSharedRef<PCGExData::FFacade>>& InSources, const TSharedPtr<PCGExData::FUnionMetadata>& InUnionMetadata)
+	bool FUnionOpsManager::Init(FPCGExContext* InContext, const TSharedPtr<PCGExData::FFacade>& TargetData, const TArray<TSharedRef<PCGExData::FFacade>>& InSources, const TSharedPtr<PCGExData::FUnionMetadata>& InUnionMetadata, const TSharedPtr<const FBlendOpsSchema>& InSchema)
 	{
 		CurrentUnionMetadata = InUnionMetadata;
-		return Init(InContext, TargetData, InSources);
+		return Init(InContext, TargetData, InSources, InSchema);
 	}
 
 	void FUnionOpsManager::InitTrackers(TArray<PCGEx::FOpStats>& Trackers) const

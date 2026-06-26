@@ -7,6 +7,7 @@
 #include "Blenders/PCGExUnionOpsManager.h"
 #include "Containers/PCGExScopedContainers.h"
 #include "Core/PCGExBlendOpsManager.h"
+#include "Core/PCGExBlendOpsSchema.h"
 #include "Core/PCGExOpStats.h"
 #include "Data/PCGBasePointData.h"
 #include "Data/PCGExData.h"
@@ -43,6 +44,19 @@ UPCGExSampleNearestBoundsSettings::UPCGExSampleNearestBoundsSettings(const FObje
 	{
 		WeightRemap = PCGExCurves::WeightDistributionLinear;
 	}
+}
+
+#if WITH_EDITOR
+void UPCGExSampleNearestBoundsSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+#endif
+
+FName UPCGExSampleNearestBoundsSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
 }
 
 TArray<FPCGPinProperties> UPCGExSampleNearestBoundsSettings::InputPinProperties() const
@@ -120,6 +134,18 @@ bool FPCGExSampleNearestBoundsElement::Boot(FPCGExContext* InContext) const
 		Context->Sorter->SortDirection = Settings->SortDirection;
 	}
 
+	if (!Context->BlendingFactories.IsEmpty())
+	{
+		// Resolve blend op configs once, here, single-threaded: per-processor blender init then
+		// only instantiates ops (no concurrent metadata enumeration on shared target facades),
+		// and the preloader warms exactly the attribute set the ops will read.
+		Context->BlendOpsSchema = MakeShared<PCGExBlending::FBlendOpsSchema>();
+		if (!Context->BlendOpsSchema->Init(Context, Context->BlendingFactories, Context->TargetsHandler->GetFacades()))
+		{
+			return false;
+		}
+	}
+
 	{
 		PCGExAsyncHelpers::FAsyncExecutionScope CollectionBuildingTasks(Context->NumMaxTargets);
 		Context->TargetsHandler->ForEachPreloader([&](PCGExData::FFacadePreloader& Preloader)
@@ -131,13 +157,16 @@ bool FPCGExSampleNearestBoundsElement::Boot(FPCGExContext* InContext) const
 			Context->Collections.Add(Collection);
 
 			CollectionBuildingTasks.Execute(
-				[CtxHandle = Context->GetOrCreateHandle(), Collection, Facade, BoundsSource = Settings->BoundsSource]()
+				[CtxHandle = Context->GetWeakSelfHandle(), Collection, Facade, BoundsSource = Settings->BoundsSource]()
 				{
 					PCGEX_SHARED_CONTEXT_VOID(CtxHandle);
 					Collection->BuildFrom(Facade->Source, BoundsSource);
 				});
 
-			PCGExBlending::RegisterBuffersDependencies_SourceA(Context, Preloader, Context->BlendingFactories);
+			if (Context->BlendOpsSchema)
+			{
+				Context->BlendOpsSchema->RegisterBuffersDependencies(Context, Preloader);
+			}
 		});
 	}
 
@@ -162,7 +191,7 @@ bool FPCGExSampleNearestBoundsElement::AdvanceWork(FPCGExContext* InContext, con
 	{
 		Context->SetState(PCGExCommon::States::State_FacadePreloading);
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetOrCreateHandle();
+		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetWeakSelfHandle();
 		Context->TargetsHandler->TargetsPreloader->OnCompleteCallback = [Settings, Context, WeakHandle]()
 		{
 			PCGEX_SHARED_CONTEXT_VOID(WeakHandle)
@@ -294,7 +323,7 @@ namespace PCGExSampleNearestBounds
 		if (!Context->BlendingFactories.IsEmpty())
 		{
 			UnionBlendOpsManager = MakeShared<PCGExBlending::FUnionOpsManager>(&Context->BlendingFactories, Distances);
-			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetsHandler->GetFacades()))
+			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetsHandler->GetFacades(), Context->BlendOpsSchema))
 			{
 				return false;
 			}

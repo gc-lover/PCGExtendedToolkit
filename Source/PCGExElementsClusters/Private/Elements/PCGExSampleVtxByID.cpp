@@ -7,6 +7,7 @@
 
 #include "Clusters/PCGExClusterCommon.h"
 #include "Core/PCGExBlendOpsManager.h"
+#include "Core/PCGExBlendOpsSchema.h"
 #include "Data/PCGExData.h"
 #include "Data/PCGExDataTags.h"
 #include "Data/PCGExPointIO.h"
@@ -14,6 +15,7 @@
 #include "Details/PCGExSettingsDetails.h"
 #include "Graphs/PCGExGraph.h"
 #include "Math/PCGExMathDistances.h"
+#include "Sampling/PCGExSamplingCommon.h"
 #include "Sampling/PCGExSamplingUnionData.h"
 
 #define LOCTEXT_NAMESPACE "PCGExSampleVtxByIDElement"
@@ -24,6 +26,19 @@ PCGEX_SETTING_VALUE_IMPL(UPCGExSampleVtxByIDSettings, LookAtUp, FVector, LookAtU
 UPCGExSampleVtxByIDSettings::UPCGExSampleVtxByIDSettings(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+}
+
+#if WITH_EDITOR
+void UPCGExSampleVtxByIDSettings::ApplyDeprecationBeforeUpdatePins(UPCGNode* InOutNode, TArray<TObjectPtr<UPCGPin>>& InputPins, TArray<TObjectPtr<UPCGPin>>& OutputPins)
+{
+	InOutNode->RenameInputPin(PCGPinConstants::DefaultInputLabel, PCGExSampling::Labels::SourceSourceLabel);
+	Super::ApplyDeprecationBeforeUpdatePins(InOutNode, InputPins, OutputPins);
+}
+#endif
+
+FName UPCGExSampleVtxByIDSettings::GetMainInputPin() const
+{
+	return PCGExSampling::Labels::SourceSourceLabel;
 }
 
 TArray<FPCGPinProperties> UPCGExSampleVtxByIDSettings::InputPinProperties() const
@@ -84,12 +99,27 @@ bool FPCGExSampleVtxByIDElement::Boot(FPCGExContext* InContext) const
 		Context->TargetFacades.Add(TargetFacade.ToSharedRef());
 	}
 
+	if (!Context->BlendingFactories.IsEmpty())
+	{
+		// Resolve blend op configs once, here, single-threaded: per-processor blender init then
+		// only instantiates ops (no concurrent metadata enumeration on shared target facades),
+		// and the preloader warms exactly the attribute set the ops will read.
+		Context->BlendOpsSchema = MakeShared<PCGExBlending::FBlendOpsSchema>();
+		if (!Context->BlendOpsSchema->Init(Context, Context->BlendingFactories, Context->TargetFacades))
+		{
+			return false;
+		}
+	}
+
 	Context->TargetsPreloader = MakeShared<PCGExData::FMultiFacadePreloader>(Context->TargetFacades);
 
 	Context->TargetsPreloader->ForEach([&](PCGExData::FFacadePreloader& Preloader)
 	{
 		Preloader.Register<int64>(Context, PCGExClusters::Labels::Attr_PCGExVtxIdx);
-		PCGExBlending::RegisterBuffersDependencies_SourceA(Context, Preloader, Context->BlendingFactories);
+		if (Context->BlendOpsSchema)
+		{
+			Context->BlendOpsSchema->RegisterBuffersDependencies(Context, Preloader);
+		}
 	});
 
 	return true;
@@ -105,18 +135,18 @@ bool FPCGExSampleVtxByIDElement::AdvanceWork(FPCGExContext* InContext, const UPC
 	{
 		Context->SetState(PCGExCommon::States::State_FacadePreloading);
 
-		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetOrCreateHandle();
+		TWeakPtr<FPCGContextHandle> WeakHandle = Context->GetWeakSelfHandle();
 		Context->TargetsPreloader->OnCompleteCallback = [Settings, Context, WeakHandle]()
 		{
 			// TODO : Need to revisit this, it's likely way too slow
 			for (const TSharedRef<PCGExData::FFacade>& TargetFacade : Context->TargetFacades)
 			{
 				const TConstPCGValueRange<int64> MetadataEntries = TargetFacade->GetIn()->GetConstMetadataEntryValueRange();
-				const FPCGMetadataAttribute<int64>* Attr = TargetFacade->FindConstAttribute<int64>(PCGExClusters::Labels::Attr_PCGExVtxIdx);
+				const FPCGMetadataAttributeBase* Attr = TargetFacade->FindConstAttribute<int64>(PCGExClusters::Labels::Attr_PCGExVtxIdx);
 
 				for (int i = 0; i < MetadataEntries.Num(); i++)
 				{
-					uint32 VtxID = PCGEx::H64A(Attr->GetValueFromItemKey(MetadataEntries[i]));
+					uint32 VtxID = PCGEx::H64A(Attr->GetValueFromItemKey<int64>(MetadataEntries[i]));
 					Context->VtxLookup.Add(VtxID, PCGEx::H64(i, TargetFacade->Idx));
 				}
 			}
@@ -205,7 +235,7 @@ namespace PCGExSampleVtxByID
 		if (!Context->BlendingFactories.IsEmpty())
 		{
 			UnionBlendOpsManager = MakeShared<PCGExBlending::FUnionOpsManager>(&Context->BlendingFactories, PCGExMath::GetDistances());
-			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetFacades))
+			if (!UnionBlendOpsManager->Init(Context, PointDataFacade, Context->TargetFacades, Context->BlendOpsSchema))
 			{
 				return false;
 			}

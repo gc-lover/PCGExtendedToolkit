@@ -21,8 +21,11 @@ struct PCGEXCORE_API FPCGExInputConfig
 
 	FPCGExInputConfig() = default;
 	explicit FPCGExInputConfig(const FPCGAttributePropertyInputSelector& InSelector);
-	explicit FPCGExInputConfig(const FPCGExInputConfig& Other);
 	explicit FPCGExInputConfig(const FName InName);
+
+	// Compiler-generated copy/move: Attribute/UnderlyingType are transient caches rebound by Validate(), so never read them before calling it.
+	FPCGExInputConfig(const FPCGExInputConfig&) = default;
+	FPCGExInputConfig& operator=(const FPCGExInputConfig&) = default;
 
 	virtual ~FPCGExInputConfig() = default;
 	UPROPERTY(VisibleAnywhere, Category=Settings, meta=(HideInDetailPanel, EditCondition="false", EditConditionHides))
@@ -130,3 +133,17 @@ struct PCGEXCORE_API FPCGExAttributeSourceToTargetList
 	bool ValidateNames(FPCGExContext* InContext) const;
 	void GetSources(TArray<FName>& OutNames) const;
 };
+
+#if WITH_EDITOR
+namespace PCGExAttributeMigration
+{
+	/** Editor-only deprecation aid: append one source->target mapping per legacy selector. Source is set to
+	 *  the selector's canonical text so it round-trips through FPCGExAttributeSourceToTargetDetails::GetSourceSelector()
+	 *  (which feeds Source back into FPCGAttributePropertyInputSelector::Update) and resolves to the same
+	 *  attribute / $property / @domain / .sub the selector did. No remap is set, so the promoted output name
+	 *  keeps the pre-migration (source-resolved) behavior. Shared by every FPCGExAttributeToTagDetails user. */
+	PCGEXCORE_API void AppendMappingsFromSelectors(
+		TConstArrayView<FPCGAttributePropertyInputSelector> InSelectors,
+		TArray<FPCGExAttributeSourceToTargetDetails>& OutMappings);
+}
+#endif

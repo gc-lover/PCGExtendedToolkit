@@ -101,7 +101,6 @@ public:
 
 	virtual TSharedPtr<PCGExPointFilter::IFilter> CreateFilter() const;
 
-	int32 Priority = 0;
 	EPCGExFilterNoDataFallback InitializationFailurePolicy = EPCGExFilterNoDataFallback::Error;
 	EPCGExFilterNoDataFallback MissingDataPolicy = EPCGExFilterNoDataFallback::Fail;
 
@@ -181,7 +180,12 @@ namespace PCGExPointFilter
 		virtual bool Test(const PCGExClusters::FNode& Node) const;
 		virtual bool Test(const PCGExGraphs::FEdge& Edge) const;
 
-		virtual bool Test(const TSharedPtr<PCGExData::FPointIO>& IO, const TSharedPtr<PCGExData::FPointIOCollection>& ParentCollection) const; // destined for collection only, is expected to test internal PointDataFacade directly.
+		// Collection-level evaluation. MUST be self-contained: read everything from IO (and the
+		// owning factory's config), never from per-point state built in Init(). In collection mode
+		// the manager keeps filters whose per-point Init() failed (the seed facade may lack the
+		// data), so this can be called even when Init() returned false -- it must not rely on any
+		// Init() side effects. Apply the data-missing fallback locally (see PCGEX_QUIET_HANDLING_RET).
+		virtual bool Test(const TSharedPtr<PCGExData::FPointIO>& IO, const TSharedPtr<PCGExData::FPointIOCollection>& ParentCollection) const;
 
 		virtual void SetSupportedTypes(const TSet<PCGExFactories::EType>* InTypes)
 		{
@@ -313,6 +317,14 @@ namespace PCGExPointFilter
 
 	PCGEXFILTERS_API
 	void PruneForDirectEvaluation(FPCGExContext* InContext, TArray<TObjectPtr<const UPCGExPointFilterFactoryData>>& InFactories);
+
+	/** Per-point match-rule policy for filters that only support collection-level data matching. Returns true (and
+	 *  logs an error) when there IS a per-point rule (bWantsPoints) AND the filter will be evaluated per-point
+	 *  (bSupportsCollectionFallback == false) -- the caller should then fail Init. Returns false (proceed) when there
+	 *  is no per-point rule, or when the filter falls back to collection/proxy evaluation, where the rule degrades to
+	 *  the representative element rather than being unsupported. */
+	PCGEXFILTERS_API
+	bool RejectPerPointMatchRule(FPCGExContext* InContext, const TCHAR* InFilterLabel, const bool bWantsPoints, const bool bSupportsCollectionFallback);
 }
 
 USTRUCT(meta=(PCG_DataTypeDisplayName="PCGEx | Filter (Data)"))

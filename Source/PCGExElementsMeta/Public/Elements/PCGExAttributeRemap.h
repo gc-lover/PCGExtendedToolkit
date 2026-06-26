@@ -63,10 +63,12 @@ class UPCGExAttributeRemapSettings : public UPCGExPointsProcessorSettings
 public:
 	//~Begin UPCGSettings
 #if WITH_EDITOR
-	virtual void ApplyDeprecation(UPCGNode* InOutNode) override;
+	virtual void PCGExApplyDeprecation(UPCGNode* InOutNode) override;
 
 	PCGEX_NODE_INFOS_CUSTOM_SUBTITLE(AttributeRemap, "Attribute Remap", "Remap a single property or attribute.", FName(GetDisplayName()));
 
+	virtual TArray<FText> GetNodeTitleAliases() const override;
+	
 	virtual EPCGSettingsType GetType() const override
 	{
 		return EPCGSettingsType::Metadata;
@@ -93,10 +95,10 @@ public:
 #pragma region DEPRECATED
 
 	// Deprecated, old source/target
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName SourceAttributeName_DEPRECATED = NAME_None;
 
-	UPROPERTY(meta=(DeprecatedProperty))
+	UPROPERTY(meta=(DeprecatedProperty, ScriptNoExport))
 	FName TargetAttributeName_DEPRECATED = NAME_None;
 
 #pragma endregion

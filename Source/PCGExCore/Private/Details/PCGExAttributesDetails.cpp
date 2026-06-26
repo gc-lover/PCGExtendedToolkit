@@ -18,12 +18,6 @@ FPCGExInputConfig::FPCGExInputConfig(const FPCGAttributePropertyInputSelector& I
 	Selector.ImportFromOtherSelector(InSelector);
 }
 
-FPCGExInputConfig::FPCGExInputConfig(const FPCGExInputConfig& Other)
-	: Attribute(Other.Attribute)
-{
-	Selector.ImportFromOtherSelector(Other.Selector);
-}
-
 FPCGExInputConfig::FPCGExInputConfig(const FName InName)
 {
 	Selector.Update(InName.ToString());
@@ -131,3 +125,16 @@ void FPCGExAttributeSourceToTargetList::GetSources(TArray<FName>& OutNames) cons
 		OutNames.Add(Entry.Source);
 	}
 }
+
+#if WITH_EDITOR
+void PCGExAttributeMigration::AppendMappingsFromSelectors(
+	const TConstArrayView<FPCGAttributePropertyInputSelector> InSelectors,
+	TArray<FPCGExAttributeSourceToTargetDetails>& OutMappings)
+{
+	OutMappings.Reserve(OutMappings.Num() + InSelectors.Num());
+	for (const FPCGAttributePropertyInputSelector& Selector : InSelectors)
+	{
+		OutMappings.Emplace(FName(*Selector.GetDisplayText().ToString()));
+	}
+}
+#endif

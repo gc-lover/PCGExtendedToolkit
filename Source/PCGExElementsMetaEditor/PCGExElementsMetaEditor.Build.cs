@@ -33,6 +33,7 @@ public class PCGExElementsMetaEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
+				"PCG",
 				"Slate",
 				"SlateCore",
 				"PropertyEditor"
