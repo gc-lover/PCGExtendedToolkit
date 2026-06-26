@@ -309,12 +309,8 @@ MACRO(EdgeUnionSize, int32, 0, UnionSize)
 
 				TArray<TSharedRef<PCGExData::FFacade>> EdgeSources = *InBuilder->SourceEdgeFacades;
 
-				if (InBuilder->SourceEdgeFacades->Num() >= 3 && InBuilder->Graph->SubGraphs.Num() > 1)
+				if (InBuilder->SourceEdgeFacades->Num() > 1)
 				{
-					// NOTE : Need to find better metrics.
-					// We want to avoid going through massive graphs with few sources as it would be wasted compute
-					// On the other end many small subgraphs will cripple the cache with tons of useless source references
-
 					TRACE_CPUPROFILER_EVENT_SCOPE(FindUniqueSourceIOIndices);
 
 					TSet<int32> UniqueSourceIOIndices;
@@ -332,10 +328,12 @@ MACRO(EdgeUnionSize, int32, 0, UnionSize)
 					}
 
 					UniqueSourceIOIndices.Remove(-1);
+
 					EdgeSources.SetNumUninitialized(Algo::RemoveIf(EdgeSources, [&UniqueSourceIOIndices](const TSharedRef<PCGExData::FFacade>& SrcIO)
 					{
 						return !UniqueSourceIOIndices.Contains(SrcIO->Source->IOIndex);
 					}));
+					
 				}
 
 				if (!EdgeSources.IsEmpty())
