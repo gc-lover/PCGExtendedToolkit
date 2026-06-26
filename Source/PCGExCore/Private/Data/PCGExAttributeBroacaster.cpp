@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Data/PCGExAttributeBroadcaster.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGParamData.h"
 #include "Data/PCGExDataHelpers.h"

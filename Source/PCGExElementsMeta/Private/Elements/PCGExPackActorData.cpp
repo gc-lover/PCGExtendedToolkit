@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Elements/PCGExPackActorData.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGComponent.h"
 

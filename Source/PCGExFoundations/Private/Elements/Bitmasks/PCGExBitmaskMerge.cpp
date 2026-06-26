@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Elements/Bitmasks/PCGExBitmaskMerge.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGParamData.h"
 #include "PCGPin.h"

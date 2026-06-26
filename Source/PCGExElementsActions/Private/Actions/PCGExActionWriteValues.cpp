@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Actions/PCGExActionWriteValues.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 #include "Factories/PCGExFactoryProvider.h"
 
 

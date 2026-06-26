@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Elements/PCGExPointsToBounds.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "Blenders/PCGExMetadataBlender.h"
 #include "Clusters/PCGExClustersHelpers.h"

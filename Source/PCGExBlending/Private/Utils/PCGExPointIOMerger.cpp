@@ -3,6 +3,7 @@
 
 
 #include "Utils/PCGExPointIOMerger.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "Data/PCGExDataTags.h"
 #include "Details/PCGExBlendingDetails.h"

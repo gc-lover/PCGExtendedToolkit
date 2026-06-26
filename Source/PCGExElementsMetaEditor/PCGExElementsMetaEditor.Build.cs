@@ -22,6 +22,7 @@ public class PCGExElementsMetaEditor : ModuleRules
 				"CoreUObject",
 				"UnrealEd",
 				"Engine",
+				"PCG",
 				"PCGExCore",
 				"PCGExCoreEditor",
 				"PCGExElementsMeta",

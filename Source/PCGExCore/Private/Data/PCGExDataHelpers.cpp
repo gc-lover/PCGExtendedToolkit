@@ -1,7 +1,8 @@
-﻿// Copyright 2026 Timothé Lapetite and contributors
+// Copyright 2026 Timothé Lapetite and contributors
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Data/PCGExDataHelpers.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGExLog.h"
 #include "Data/PCGExData.h"
@@ -65,12 +66,12 @@ namespace PCGExData::Helpers
 		const FPCGMetadataAttribute<T>* Attr = Attribute;
 		if (!Attr->GetNumberOfEntries())
 		{
-			const FPCGMetadataAttribute<T>* Parent = Attr->GetParent();
+			const FPCGMetadataAttribute<T>* Parent = static_cast<const FPCGMetadataAttribute<T>*>(Attr->GetParent());
 			while (Parent)
 			{
 				if (!Parent->GetNumberOfEntries())
 				{
-					Parent = Parent->GetParent();
+					Parent = static_cast<const FPCGMetadataAttribute<T>*>(Parent->GetParent());
 				}
 				else
 				{

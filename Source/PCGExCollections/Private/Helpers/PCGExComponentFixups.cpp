@@ -62,8 +62,8 @@ namespace PCGExComponentFixups
 				// Without this guard, two empty/disabled splines would be reported as
 				// diverged and the fixup would try to rebuild SplineCurves from the empty
 				// Spline via SetSpline(GetSpline()), wiping the archetype's SplineCurves data.
-				const int32 CurSplinePts = Spline->GetSpline().GetNumControlPoints();
-				const int32 ArchSplinePts = ArchSpline->GetSpline().GetNumControlPoints();
+				const int32 CurSplinePts = Spline->GetNumberOfSplinePoints();
+				const int32 ArchSplinePts = ArchSpline->GetNumberOfSplinePoints();
 				const bool bBothSplinesEmpty = (CurSplinePts == 0 && ArchSplinePts == 0);
 
 

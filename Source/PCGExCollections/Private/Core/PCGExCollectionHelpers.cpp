@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Core/PCGExCollectionHelpers.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGParamData.h"
 #include "Core/PCGExAssetCollection.h"

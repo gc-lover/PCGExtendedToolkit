@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Timothé Lapetite and contributors
+// Copyright 2026 Timothé Lapetite and contributors
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #pragma once
@@ -154,7 +154,7 @@ namespace PCGExSampleTexture
 			FVector4 SampledValue = FVector4::Zero();
 			float SampledDensity = 1;
 
-			if (const UPCGBaseTextureData* Tex = TextureMap->TryGetTextureData(IDGetter->FetchSingle(Point, TEXT("")));
+			if (const UPCGTexture2DSingleBaseData* Tex = TextureMap->TryGetTextureData(IDGetter->FetchSingle(Point, TEXT("")));
 				!Tex || !Tex->SamplePointLocal(UV, SampledValue, SampledDensity))
 			{
 				return false;

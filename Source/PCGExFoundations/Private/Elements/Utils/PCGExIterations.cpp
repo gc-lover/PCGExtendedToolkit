@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Timothé Lapetite and contributors
+// Copyright 2026 Timothé Lapetite and contributors
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Elements/Utils/PCGExIterations.h"
@@ -67,7 +67,7 @@ TArray<FPCGPinProperties> UPCGExIterationsSettings::OutputPinProperties() const
 		Pin.AllowedTypes = FPCGDataTypeInfoSpline::AsId();
 		break;
 	case EPCGExIterationDataType::Texture:
-		Pin.AllowedTypes = FPCGDataTypeInfoBaseTexture2D::AsId();
+		Pin.AllowedTypes = FPCGDataTypeInfoTexture2D::AsId();
 		break;
 	}
 #endif

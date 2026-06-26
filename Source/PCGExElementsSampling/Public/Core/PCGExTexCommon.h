@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Timothé Lapetite and contributors
+// Copyright 2026 Timothé Lapetite and contributors
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #pragma once
@@ -14,7 +14,7 @@
 #endif
 #include "Factories/PCGExFactoryProvider.h"
 
-class UPCGBaseTextureData;
+class UPCGTexture2DSingleBaseData;
 class UMaterialInterface;
 class UPCGExTexParamFactoryData;
 
@@ -56,7 +56,7 @@ namespace PCGExTexture
 
 	class FLookup : public TSharedFromThis<FLookup>
 	{
-		TMap<FString, const UPCGBaseTextureData*> TextureDataMap;
+		TMap<FString, const UPCGTexture2DSingleBaseData*> TextureDataMap;
 
 	public:
 		FLookup()
@@ -75,6 +75,6 @@ namespace PCGExTexture
 		void ExtractParamsAndReferences(const int32 PointIndex, const UMaterialInterface* InMaterial, TSet<FReference>& References) const;
 
 		void BuildMapFrom(FPCGExContext* InContext, const FName InPin);
-		const UPCGBaseTextureData* TryGetTextureData(const FString& InPath) const;
+		const UPCGTexture2DSingleBaseData* TryGetTextureData(const FString& InPath) const;
 	};
 }

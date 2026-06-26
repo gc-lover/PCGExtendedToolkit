@@ -27,6 +27,7 @@
 #include "Metadata/Accessors/PCGAttributeAccessorKeys.h"
 #include "Metadata/Accessors/PCGCustomAccessor.h"
 #include "Metadata/PCGMetadata.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #define LOCTEXT_NAMESPACE "PCGExGetPropertiesDataElement"
 #define PCGEX_NAMESPACE GetPropertiesData

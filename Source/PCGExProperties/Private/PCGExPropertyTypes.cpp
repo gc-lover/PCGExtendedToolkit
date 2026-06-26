@@ -4,6 +4,7 @@
 #include "PCGExPropertyTypes.h"
 
 #include "Metadata/PCGMetadata.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 #include "Types/PCGExTypeOps.h"
 
 // ============================================================================

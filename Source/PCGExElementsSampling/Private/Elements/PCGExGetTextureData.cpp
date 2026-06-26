@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Timothé Lapetite and contributors
+// Copyright 2026 Timothé Lapetite and contributors
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Elements/PCGExGetTextureData.h"
@@ -191,7 +191,7 @@ void FPCGExGetTextureDataContext::AdvanceProcessing(const int32 Index)
 		});
 	};
 
-	auto ApplySettings = [&](UPCGBaseTextureData* InTex)
+	auto ApplySettings = [&](UPCGTexture2DSingleBaseData* InTex)
 	{
 		InTex->Filter = Settings->Filter == EPCGExTextureFilter::Bilinear ? EPCGTextureFilter::Bilinear : EPCGTextureFilter::Point;
 
@@ -227,7 +227,7 @@ void FPCGExGetTextureDataContext::AdvanceProcessing(const int32 Index)
 		{
 			TObjectPtr<UPCGRenderTargetData> RTData = ManagedObjects->New<UPCGRenderTargetData>();
 
-			ApplySettings(RTData);
+			ApplySettings(RTData.Get());
 			RTData->Initialize(RT, Transform);
 
 			StageOutput(RTData, PCGExTexture::OutputTextureDataLabel, PCGExData::EStaging::None, {Ref.GetTag()});

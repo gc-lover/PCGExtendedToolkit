@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Data/PCGExDataValue.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "Data/PCGExDataHelpers.h"
 #include "Data/PCGExSubSelection.h"

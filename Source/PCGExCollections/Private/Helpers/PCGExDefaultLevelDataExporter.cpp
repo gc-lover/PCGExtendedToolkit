@@ -2,6 +2,7 @@
 // Released under the MIT license https://opensource.org/license/MIT/
 
 #include "Helpers/PCGExDefaultLevelDataExporter.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGDataAsset.h"
 #include "PCGParamData.h"

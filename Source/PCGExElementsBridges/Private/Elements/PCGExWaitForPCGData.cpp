@@ -143,7 +143,7 @@ TArray<FPCGPinProperties> UPCGExWaitForPCGDataSettings::OutputPinProperties() co
 		PCGEX_PIN_ANY(RoamingPin, "Roaming data that isn't part of the template output but still exists.", Normal)
 	}
 
-	PinProperties.Append(CachedPins);
+	PinProperties.Append(CachedTargetPins);
 
 	return PinProperties;
 }
@@ -153,7 +153,7 @@ void UPCGExWaitForPCGDataSettings::EDITOR_RefreshPins()
 {
 	Modify(true);
 
-	GetTargetGraphPins(CachedPins); // Force-refresh cached pins
+	GetTargetGraphPins(CachedTargetPins); // Force-refresh cached pins
 
 	FPropertyChangedEvent EmptyEvent(nullptr);
 	PostEditChangeProperty(EmptyEvent);
@@ -235,7 +235,7 @@ bool FPCGExWaitForPCGDataElement::Boot(FPCGExContext* InContext) const
 		PCGEX_VALIDATE_NAME(Settings->TemplateGraphAttributeName)
 	}
 
-	for (FPCGPinProperties Pin : Settings->CachedPins)
+	for (FPCGPinProperties Pin : Settings->CachedTargetPins)
 	{
 		Context->AllLabels.Add(Pin.Label);
 
